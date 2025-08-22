@@ -1,0 +1,66 @@
+When selling clothes on eBay, title structure is critical for visibility in search results and buyer click-through. eBay search heavily relies on title keywords—not descriptions or item specifics—so structuring them properly makes a direct impact on sell-through rate (STR).
+
+Here’s what’s known to work well:
+
+🔹 General Structure (Clothing Titles)
+Brand + Item Type + Gender + Size + Color + Features + Style Keywords
+
+Example:
+
+vbnet
+Copy
+Edit
+Levi's Jeans Mens 34x32 Blue 501 Button Fly Straight Leg USA Made
+
+🔹 Best Practices
+Maximize all 80 characters – Use the full space for keywords buyers search.
+
+Start with brand – Buyers often search by brand first.
+
+Use full words for sizes – e.g., “Large” not “L” if space allows (some exceptions exist).
+
+Use high-traffic keywords – like “Slim Fit,” “Y2K,” “Western,” “Grunge,” “Stretch,” “Vintage.”
+
+Mention flaws (if major) – Use “FLAWED” early in the title if significant.
+
+Avoid filler words – e.g., “Nice,” “Great,” “Look” – they waste space.
+
+Do not include:
+
+Symbols (!, *, etc.)
+
+SKUs, product codes
+
+Country unless Made in USA/Canada
+
+Terms like “Denim” for jeans or "Mens" if already obvious from category (depends on your store system)
+
+🔹 Category-Specific Tips
+Jeans:
+Include tag size + actual measured size if different. Include cut (bootcut, flare), rise (high rise), and style terms (Y2K, Grunge, Cowboy).
+
+mathematica
+Copy
+Edit
+7 For All Mankind Jeans Womens 27 (Fits 26x29) Blue Dojo Flare Y2K USA Made
+Shirts (Button-Downs, Polos, Tees):
+Use keywords like “Western,” “Pearl Snap,” “Polo,” “Graphic,” “Preppy,” etc.
+
+mathematica
+Copy
+Edit
+Ralph Lauren Shirt Mens Large Blue Oxford Classic Fit Preppy Casual
+Hoodies & Jackets:
+Material keywords matter—“Fleece,” “Sherpa,” “Canvas,” “Heavyweight.” Also include model names when identifiable.
+
+mathematica
+Copy
+Edit
+Carhartt Jacket Mens XL Brown Duck Canvas Blanket Lined Workwear USA Made
+Activewear:
+Mention fabric tech (e.g., “Dri-FIT,” “ClimaCool,” “Stretch”) and purpose keywords (“Training,” “Running,” “Gym”).
+
+mathematica
+Copy
+Edit
+Nike Shirt Mens Medium Black Dri-FIT 1/4 Zip Training Swoosh Sweatshirt Gym

@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "eBay US → CA Bridge",
+  "version": "2.0",
+  "description": "Bridge your eBay.com listings to eBay.ca with automatic data extraction and cross-border listing creation",
+  "permissions": [
+    "scripting",
+    "tabs",
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://*.ebay.com/*",
+    "https://*.ebay.ca/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["settings.json"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

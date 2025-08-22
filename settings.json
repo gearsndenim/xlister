@@ -1,0 +1,72 @@
+{
+  "currency": {
+    "usdToCadRate": 1.35,
+    "lastUpdated": "2025-08-22",
+    "note": "Update this rate regularly or integrate with a live currency API"
+  },
+  
+  "templates": {
+    "ebayCA": {
+      "defaultTemplate": "https://www.ebay.ca/lstng?mode=AddItem",
+      "categories": {
+        "jeans": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650616013",
+
+        "hoodies": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_HOODIES_CA",
+        "jackets": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_JACKETS_CA",
+        "jackets_womens": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_JACKETS_WOMENS_CA",
+        "jeans_womens": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_JEANS_WOMENS_CA",
+        "pants": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_PANTS_CA",
+        "shirt_activewear": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHIRT_ACTIVEWEAR_CA",
+        "shirt_button": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHIRT_BUTTON_CA",
+        "shirt_polo": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHIRT_POLO_CA",
+        "shirt_tee": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHIRT_TEE_CA",
+        "shorts_activewear": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHORTS_ACTIVEWEAR_CA",
+        "shorts_swim": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHORTS_SWIM_CA",
+        "shorts": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHORTS_CA",
+        "sweaters": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SWEATERS_CA",
+        "sweatpants": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SWEATPANTS_CA"
+      }
+    }
+  },
+  
+  "defaults": {
+    "adRate": "6.0",
+    "templateType": "jeans",
+    "defaultConditionText": "washed using hypoallergenic laundry detergent that is free of dyes and perfumes."
+  },
+  
+  "ui": {
+    "messages": {
+      "ebayCADetected": "🇨🇦 eBay.ca detected. Loading saved JSON...",
+      "ebayUSDetected": "🌉 eBay.com listing detected. Ready to extract and bridge to eBay.ca",
+      "ebayUSItemDetected": "📦 eBay.com item detected. Click to navigate to edit mode and extract data.",
+      "chatgptDetected": "🔍 ChatGPT detected. Scanning for listing JSON...",
+      "extracting": "Extracting...",
+      "updating": "Updating...",
+      "navigating": "🔄 Navigating to edit mode...",
+      "unavailable": "⚠️ Please navigate to an eBay.com listing to bridge to eBay.ca",
+      "noJsonFound": "⚠️ No saved JSON found.",
+      "jsonParsed": "✅ JSON parsed from ChatGPT.",
+      "dataExtracted": "✅ eBay.com data extracted and converted. Ready to bridge to eBay.ca!",
+      "createOnEbayCA": "Create on eBay.ca"
+    },
+    "buttons": {
+      "updateCAListing": "Update CA Listing",
+      "bridgeToEbayCA": "Extract Data",
+      "editAndExtract": "Edit & Extract",
+      "createListing": "Create Listing",
+      "unavailable": "Unavailable"
+    }
+  },
+  
+  "_metadata": {
+    "version": "2.0",
+    "lastModified": "2025-08-22",
+    "description": "Configuration file for eBay US → CA Bridge extension",
+    "instructions": [
+      "1. Update templateId values with your actual eBay.ca template IDs",
+      "2. Adjust currency rate as needed (or integrate live API)",
+      "3. Customize UI messages and defaults as preferred"
+    ]
+  }
+}
