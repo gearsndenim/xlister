@@ -1,7 +1,7 @@
 {
   "currency": {
-    "usdToCadRate": 1.35,
-    "lastUpdated": "2025-08-22",
+    "usdToCadRate": 1.38,
+    "lastUpdated": "2025-08-23",
     "note": "Update this rate regularly or integrate with a live currency API"
   },
   

@@ -10,7 +10,7 @@ async function loadSettings() {
         console.error('❌ Failed to load settings:', error);
         // Fallback to default settings
         settings = {
-            currency: { usdToCadRate: 1.35 },
+            currency: { usdToCadRate: 1.38 },
             templates: { ebayCA: { defaultTemplate: "https://bulkedit.ebay.ca/managetemplates", categories: {} } },
             defaults: { adRate: "6.0", templateType: "jeans" },
             ui: { messages: {}, buttons: {} }

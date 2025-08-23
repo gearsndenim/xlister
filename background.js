@@ -78,7 +78,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             settings = await response.json();
           } catch (error) {
             console.error('Failed to load settings, using defaults');
-            settings = { currency: { usdToCadRate: 1.35 } };
+            settings = { currency: { usdToCadRate: 1.38 } };
           }
 
           // Function to extract images from the listing page
@@ -209,8 +209,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           // Function to convert USD to CAD using settings
           function convertUsdToCad(usdPrice) {
-            const exchangeRate = settings.currency.usdToCadRate || 1.35;
-            return (parseFloat(usdPrice) * exchangeRate).toFixed(2);
+            const exchangeRate = settings.currency.usdToCadRate || 1.38;
+            const convertedPrice = parseFloat(usdPrice) * exchangeRate;
+            
+            // Round up to next dollar and set to .88 cents
+            const roundedUp = Math.ceil(convertedPrice);
+            return (roundedUp - 0.12).toFixed(2); // Subtract 0.12 to get .88 ending
           }
 
           // Extract listing data from eBay.com listing form
