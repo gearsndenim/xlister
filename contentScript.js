@@ -161,6 +161,11 @@ function calculateCategoryMatchScore(labelText, targetCategory, targetPath, cate
     const targetLower = targetCategory.toLowerCase();
     const targetPathLower = targetPath?.toLowerCase() || '';
     
+    // Debug logging for gender detection
+    console.warn(`🔍 Scoring: "${labelText}" vs target "${targetCategory}"`);
+    console.warn(`📍 Target path: "${targetPath}"`);
+    console.warn(`👤 Category info:`, categoryInfo);
+    
     // 1. Category name matching (most important)
     if (labelLower === targetLower) {
         score += 100;
@@ -175,8 +180,10 @@ function calculateCategoryMatchScore(labelText, targetCategory, targetPath, cate
     
     // 2. Gender/department matching (very important for disambiguation)
     if (targetPathLower) {
+        console.warn(`🚻 Gender analysis: targetPath="${targetPathLower}"`);
         if (targetPathLower.includes('men') && !targetPathLower.includes('women')) {
             // This is a men's item
+            console.warn(`♂️ Detected men's item from path`);
             if (labelLower.includes('men') && !labelLower.includes('women')) {
                 score += 50;
                 reasons.push('men\'s category match');
@@ -186,6 +193,7 @@ function calculateCategoryMatchScore(labelText, targetCategory, targetPath, cate
             }
         } else if (targetPathLower.includes('women') || targetPathLower.includes('ladies')) {
             // This is a women's item
+            console.warn(`♀️ Detected women's item from path`);
             if (labelLower.includes('women') || labelLower.includes('ladies')) {
                 score += 50;
                 reasons.push('women\'s category match');
@@ -193,6 +201,8 @@ function calculateCategoryMatchScore(labelText, targetCategory, targetPath, cate
                 score -= 50; // Penalty for wrong gender
                 reasons.push('wrong gender (men vs women)');
             }
+        } else {
+            console.warn(`⚪ No clear gender detected in path`);
         }
         
         // 3. Other path elements matching
@@ -201,6 +211,30 @@ function calculateCategoryMatchScore(labelText, targetCategory, targetPath, cate
             if (element.length > 3 && labelLower.includes(element)) {
                 score += 10;
                 reasons.push(`path element match: ${element}`);
+            }
+        }
+    }
+    
+    // Additional gender detection from categoryInfo if path doesn't have it
+    if (categoryInfo) {
+        const categoryData = JSON.stringify(categoryInfo).toLowerCase();
+        if (categoryData.includes('women') || categoryData.includes('ladies')) {
+            console.warn(`♀️ Detected women's item from categoryInfo`);
+            if (labelLower.includes('women') || labelLower.includes('ladies')) {
+                score += 40;
+                reasons.push('women\'s category match (from info)');
+            } else if (labelLower.includes('men') && !labelLower.includes('women')) {
+                score -= 40;
+                reasons.push('wrong gender from info (men vs women)');
+            }
+        } else if (categoryData.includes('men') && !categoryData.includes('women')) {
+            console.warn(`♂️ Detected men's item from categoryInfo`);
+            if (labelLower.includes('men') && !labelLower.includes('women')) {
+                score += 40;
+                reasons.push('men\'s category match (from info)');
+            } else if (labelLower.includes('women') || labelLower.includes('ladies')) {
+                score -= 40;
+                reasons.push('wrong gender from info (women vs men)');
             }
         }
     }
@@ -298,33 +332,22 @@ async function fillFields(data) {
         const conditionTextarea = document.querySelector('textarea[name="itemConditionDescription"]');
         const skuInput = document.querySelector('input[name="customLabel"]');
 
-        console.log('🔍 DEBUG: Title input found:', !!titleInput);
-        console.log('🔍 DEBUG: Data has title:', !!data.title);
-        console.log('🔍 DEBUG: Title value:', data.title);
-
         if (titleInput && data.title) {
-            console.log('📝 Setting title to:', data.title);
-            
             // Set title immediately
             titleInput.focus();
             titleInput.value = data.title;
             titleInput.dispatchEvent(new Event('input', { bubbles: true }));
             titleInput.dispatchEvent(new Event('change', { bubbles: true }));
-            console.log('✅ Title set. Current value:', titleInput.value);
             
             // Set title again after a delay to counteract eBay's interference
             setTimeout(() => {
                 const titleInputDelayed = document.querySelector('input[name="title"]');
                 if (titleInputDelayed && titleInputDelayed.value !== data.title) {
-                    console.log('🔄 Re-setting title after delay, current value:', titleInputDelayed.value);
                     titleInputDelayed.focus();
                     titleInputDelayed.value = data.title;
                     titleInputDelayed.dispatchEvent(new Event('input', { bubbles: true }));
                     titleInputDelayed.dispatchEvent(new Event('change', { bubbles: true }));
                     titleInputDelayed.dispatchEvent(new Event('blur', { bubbles: true }));
-                    console.log('✅ Title re-set after delay. Current value:', titleInputDelayed.value);
-                } else if (titleInputDelayed) {
-                    console.log('✅ Title still correct after delay:', titleInputDelayed.value);
                 }
             }, 2000);
             
@@ -332,15 +355,11 @@ async function fillFields(data) {
             setTimeout(() => {
                 const titleInputFinal = document.querySelector('input[name="title"]');
                 if (titleInputFinal && titleInputFinal.value !== data.title) {
-                    console.log('🔄 Final title check - re-setting title, current value:', titleInputFinal.value);
                     titleInputFinal.focus();
                     titleInputFinal.value = data.title;
                     titleInputFinal.dispatchEvent(new Event('input', { bubbles: true }));
                     titleInputFinal.dispatchEvent(new Event('change', { bubbles: true }));
                     titleInputFinal.dispatchEvent(new Event('blur', { bubbles: true }));
-                    console.log('✅ Final title set. Current value:', titleInputFinal.value);
-                } else if (titleInputFinal) {
-                    console.log('✅ Title still correct at final check:', titleInputFinal.value);
                 }
             }, 5000);
         }
@@ -370,11 +389,9 @@ async function fillFields(data) {
         }
 
         // Continue with rest of form filling after category is set
-        console.log('🎯 Category handling complete, continuing with other form fields...');
 
         // Handle description field (rich text editor)
         if (data.description) {
-            console.log('📝 Setting description field...');
             let description = data.description;
             let descriptionSet = false;
             
@@ -426,7 +443,6 @@ async function fillFields(data) {
                     await new Promise(resolve => setTimeout(resolve, 500));
                     
                     descriptionSet = true;
-                    console.log('✅ Description set via iframe method');
                     
                 } catch (error) {
                     console.warn('⚠️ Error waiting for iframe to be ready:', error);
@@ -441,31 +457,26 @@ async function fillFields(data) {
                     descTextarea.dispatchEvent(new Event('input', { bubbles: true }));
                     descTextarea.dispatchEvent(new Event('change', { bubbles: true }));
                     descriptionSet = true;
-                    console.log('✅ Description set via textarea fallback');
                 }
             }
             
             if (!descriptionSet) {
-                console.log('⚠️ Could not find description field to set');
+                console.warn('⚠️ Could not find description field to set');
             }
         }
 
         // Handle condition field
         if (data.condition || data.itemConditionDescription) {
-            console.log('📋 Setting condition field...');
             const conditionText = data.itemConditionDescription || data.condition || 'Pre-owned';
             const conditionTextarea = document.querySelector('textarea[name="itemConditionDescription"]');
             if (conditionTextarea) {
                 conditionTextarea.value = conditionText;
                 conditionTextarea.dispatchEvent(new Event('input', { bubbles: true }));
                 conditionTextarea.dispatchEvent(new Event('change', { bubbles: true }));
-                console.log('✅ Condition set:', conditionText);
             }
         }
 
         // Handle other form fields
-        console.log('🔧 Setting other form fields...');
-        
         // Set quantity if provided
         if (data.quantity) {
             const quantityInput = document.querySelector('input[name="quantity"], input[name="qty"]');
@@ -473,16 +484,12 @@ async function fillFields(data) {
                 quantityInput.value = data.quantity;
                 quantityInput.dispatchEvent(new Event('input', { bubbles: true }));
                 quantityInput.dispatchEvent(new Event('change', { bubbles: true }));
-                console.log('✅ Quantity set:', data.quantity);
             }
         }
 
         console.log('✅ Form filling completed successfully!');
 
         async function handleCategorySelection(data) {
-            console.log('🎯 Starting enhanced category selection process');
-            console.log('🔍 Category data:', data.categoryInfo);
-            
             // Handle both eBay categories and Store categories
             let targetProductCategory = null;
             let targetStoreCategory = null;
@@ -494,60 +501,41 @@ async function fillFields(data) {
                 targetStoreCategory = data.categoryInfo.storeCategory;
                 categoryPath = data.categoryInfo.path;
                 isInferred = data.categoryInfo.inferred || false;
-                console.log('📍 Using enhanced category info:', {
-                    productCategory: targetProductCategory,
-                    storeCategory: targetStoreCategory,
-                    path: categoryPath,
-                    inferred: isInferred
-                });
             } else if (data.category) {
                 // Try to determine if this is a store category or product category
                 if (isStoreCategory(data.category)) {
                     targetStoreCategory = data.category;
-                    console.log('🏪 Using simple store category:', targetStoreCategory);
                 } else {
                     targetProductCategory = data.category;
-                    console.log('📦 Using simple product category:', targetProductCategory);
                 }
             }
             
             // Handle eBay product category first (main category)
             if (targetProductCategory) {
                 if (!isValidProductCategory(targetProductCategory)) {
-                    console.log('🚫 Product category appears to be invalid:', targetProductCategory);
+                    console.warn('🚫 Product category appears to be invalid:', targetProductCategory);
                 } else {
-                    console.log('🎯 Setting eBay product category:', targetProductCategory);
-                    console.log('📊 Category validation passed for:', targetProductCategory);
-                    
                     // Clean up category text for better matching
                     const cleanedCategory = targetProductCategory
                         .replace(/–/g, '-')
                         .replace(/—/g, '-')
                         .trim();
                     
-                    console.log('🧹 Cleaned category text:', cleanedCategory);
-                    console.log('🗺️ Category path available:', categoryPath);
-                    
                     const success = await navigateToCategory(cleanedCategory, categoryPath);
                     if (!success) {
-                        console.log('⚠️ Could not navigate to product category, trying fallback methods');
+                        console.warn('⚠️ Could not navigate to product category, trying fallback methods');
                         await fallbackCategorySelection(cleanedCategory);
-                    } else {
-                        console.log('✅ Successfully navigated to product category:', cleanedCategory);
                     }
                 }
             }
             
             // Store category handling (optional - only if provided)
             if (targetStoreCategory) {
-                console.log('🏪 Setting store category:', targetStoreCategory);
                 await handleStoreCategory(targetStoreCategory);
-            } else {
-                console.log('📝 No store category provided, continuing with eBay product category only');
             }
             
             if (!targetProductCategory && !targetStoreCategory) {
-                console.log('⚠️ No valid category information available - skipping category selection');
+                console.warn('⚠️ No valid category information available - skipping category selection');
                 return;
             }
         }
@@ -571,15 +559,12 @@ async function fillFields(data) {
             // Look for store category selection elements
             const storeCategoryButton = document.querySelector('button[name="primaryStoreCategoryId"], button[name="storeCategoryId"]');
             if (storeCategoryButton) {
-                console.log('� Found store category button, setting:', storeCategory);
                 storeCategoryButton.click();
                 await new Promise(resolve => setTimeout(resolve, 800));
                 
                 // Look for radio buttons with store category options
                 const radioOptions = document.querySelectorAll('input[name="primaryStoreCategoryId"][type="radio"]');
                 let categorySelected = false;
-                
-                console.log(`🔍 Found ${radioOptions.length} store category radio options`);
                 
                 for (const radio of radioOptions) {
                     const label = document.querySelector(`label[for="${radio.id}"]`);
@@ -588,8 +573,6 @@ async function fillFields(data) {
                         // Check if this label matches our store category with flexible matching
                         const normalizedLabel = labelText.replace(/[-–—]/g, '-').toLowerCase();
                         const normalizedTarget = storeCategory.replace(/[-–—]/g, '-').toLowerCase();
-                        
-                        console.log(`🔍 Checking store category option: "${labelText}"`);
                         
                         if (normalizedLabel === normalizedTarget ||
                             labelText === storeCategory ||
@@ -602,7 +585,6 @@ async function fillFields(data) {
                             const doneButton = document.querySelector('button[_track="1.primaryStoreCategoryId.2.Done"]');
                             if (doneButton) {
                                 doneButton.click();
-                                console.log('✅ Selected store category:', labelText);
                                 categorySelected = true;
                                 await new Promise(resolve => setTimeout(resolve, 1000));
                             }
@@ -612,14 +594,11 @@ async function fillFields(data) {
                 }
                 
                 if (!categorySelected) {
-                    console.log('🔍 Exact match not found, trying numeric range matching');
-                    
                     // Extract the numeric range from the target (e.g., "91-120" from "91-120 days")
                     const targetMatch = storeCategory.match(/(\d+)[-–](\d+)/);
                     if (targetMatch) {
                         const targetStart = parseInt(targetMatch[1]);
                         const targetEnd = parseInt(targetMatch[2]);
-                        console.log(`🔢 Looking for range ${targetStart}-${targetEnd}`);
                         
                         for (const radio of radioOptions) {
                             const label = document.querySelector(`label[for="${radio.id}"]`);
@@ -632,14 +611,12 @@ async function fillFields(data) {
                                     const labelEnd = parseInt(labelMatch[2]);
                                     
                                     if (labelStart === targetStart && labelEnd === targetEnd) {
-                                        console.log(`✅ Found numeric match: "${labelText}" for "${storeCategory}"`);
                                         radio.click();
                                         await new Promise(resolve => setTimeout(resolve, 200));
                                         
                                         const doneButton = document.querySelector('button[_track="1.primaryStoreCategoryId.2.Done"]');
                                         if (doneButton) {
                                             doneButton.click();
-                                            console.log('✅ Selected store category via numeric match:', labelText);
                                             categorySelected = true;
                                             await new Promise(resolve => setTimeout(resolve, 1000));
                                         }
@@ -652,15 +629,8 @@ async function fillFields(data) {
                 }
                 
                 if (!categorySelected) {
-                    console.log('⚠️ Store category not found in available options. Available options:');
-                    for (const radio of radioOptions) {
-                        const label = document.querySelector(`label[for="${radio.id}"]`);
-                        if (label) {
-                            console.log(`   - "${label.textContent.trim()}"`);
-                        }
-                    }
+                    console.warn('⚠️ Store category not found in available options');
                     
-                    console.log('🔧 Closing store category dialog without selection');
                     const doneButton = document.querySelector('button[_track="1.primaryStoreCategoryId.2.Done"]');
                     if (doneButton) {
                         doneButton.click();
@@ -668,7 +638,7 @@ async function fillFields(data) {
                     }
                 }
             } else {
-                console.log('⚠️ Store category button not found');
+                console.warn('⚠️ Store category button not found');
             }
         }
         
@@ -752,19 +722,14 @@ async function fillFields(data) {
                 '[data-testid="category-selector"] button'
             ];
             
-            console.log('🔍 Searching for category button with selectors...');
-            
             for (const selector of selectors) {
                 const button = document.querySelector(selector);
                 if (button) {
-                    console.log('✅ Found category button with selector:', selector);
-                    console.log('📝 Button text:', button.textContent.trim());
-                    console.log('🔍 Button name attribute:', button.getAttribute('name'));
                     return button;
                 }
             }
             
-            console.log('❌ No category button found with any selector');
+            console.warn('❌ No category button found with any selector');
             return null;
         }
         
@@ -871,42 +836,31 @@ async function fillFields(data) {
         }
         
         async function searchForCategory(targetCategory) {
-            console.log('🔍 DEBUG: Starting searchForCategory for:', targetCategory);
-            
             // Wait a moment for the category dialog to load
             await new Promise(resolve => setTimeout(resolve, 500)); // Reduced from 2000ms to 500ms
             
             // First, try to find clickable category elements directly
-            console.log('� DEBUG: Looking for clickable category elements...');
-            
             const clickableElements = document.querySelectorAll('button, a, [role="button"], [role="option"], li, label');
             let foundShorts = false;
-            
-            console.log(`🔍 DEBUG: Found ${clickableElements.length} clickable elements`);
             
             for (const element of clickableElements) {
                 const text = element.textContent.trim();
                 if (text.toLowerCase().includes('short') && text.length < 50) {
-                    console.log(`✅ DEBUG: Found shorts-related element: "${text}" (${element.tagName})`);
                     
                     // Try clicking it
                     try {
                         element.click();
-                        console.log(`👆 DEBUG: Clicked element: "${text}"`);
                         foundShorts = true;
                         await new Promise(resolve => setTimeout(resolve, 400)); // Reduced from 1000ms to 400ms
                         return await confirmCategorySelection();
                     } catch (error) {
-                        console.log(`❌ DEBUG: Failed to click element: ${error.message}`);
+                        console.warn(`❌ Failed to click element: ${error.message}`);
                     }
                 }
             }
             
             if (!foundShorts) {
-                console.log('❌ DEBUG: No shorts-related elements found');
-                
                 // Let's try to find the category selection dialog specifically
-                console.log('🔍 DEBUG: Looking for category selection dialog...');
                 const categorySelectors = [
                     '.category-picker-dialog',
                     '.category-selection-dialog',
@@ -922,15 +876,12 @@ async function fillFields(data) {
                 for (const selector of categorySelectors) {
                     categoryContainer = document.querySelector(selector);
                     if (categoryContainer && categoryContainer.offsetHeight > 0) {
-                        console.log(`🔍 DEBUG: Found category container with selector: ${selector}`);
                         break;
                     }
                 }
                 
                 if (categoryContainer) {
-                    console.log('🔍 DEBUG: Searching within category container...');
                     const containerElements = categoryContainer.querySelectorAll('button, a, [role="button"], [role="option"], li, label, span, div');
-                    console.log(`🔍 DEBUG: Found ${containerElements.length} elements in category container`);
                     
                     // First, check if we're in a subcategory and need to navigate up
                     const currentPath = Array.from(containerElements).find(el => 
@@ -938,11 +889,8 @@ async function fillFields(data) {
                     );
                     
                     if (currentPath) {
-                        console.log(`🔍 DEBUG: Current category path: ${currentPath.textContent}`);
-                        
                         // If we're in Jeans, we need to go up to Men's Clothing
                         if (currentPath.textContent.includes('Jeans')) {
-                            console.log('🔍 DEBUG: Currently in Jeans category, need to navigate to parent');
                             
                             // Look for "Men's Clothing" button to go back
                             const mensClothingButton = Array.from(containerElements).find(el => 
@@ -951,7 +899,6 @@ async function fillFields(data) {
                             );
                             
                             if (mensClothingButton) {
-                                console.log('🔍 DEBUG: Found Men\'s Clothing button, clicking to navigate up');
                                 mensClothingButton.click();
                                 
                                 // Wait for navigation and search again
@@ -959,20 +906,17 @@ async function fillFields(data) {
                                 
                                 // Now search for Shorts in the new view
                                 const updatedElements = categoryContainer.querySelectorAll('button, a, [role="button"], [role="option"], li, label, span, div');
-                                console.log(`🔍 DEBUG: After navigation, found ${updatedElements.length} elements`);
                                 
                                 for (const element of updatedElements) {
                                     const text = element.textContent.trim().toLowerCase();
                                     if (text === 'shorts' || text.includes('short') && text.length < 30) {
-                                        console.log(`✅ DEBUG: Found shorts element: "${element.textContent.trim()}"`);
                                         try {
                                             element.click();
-                                            console.log('👆 DEBUG: Clicked shorts element');
                                             foundShorts = true;
                                             await new Promise(resolve => setTimeout(resolve, 1000));
                                             return await confirmCategorySelection();
                                         } catch (error) {
-                                            console.log(`❌ DEBUG: Failed to click shorts: ${error.message}`);
+                                            console.warn(`❌ Failed to click shorts: ${error.message}`);
                                         }
                                     }
                                 }
@@ -980,35 +924,23 @@ async function fillFields(data) {
                         }
                     }
                     
-                    // If we didn't find shorts through navigation, show what's available
+                    // If we didn't find shorts through navigation, try clicking any shorts element
                     if (!foundShorts) {
-                        console.log('🔍 DEBUG: Showing available elements in category dialog:');
                         for (let i = 0; i < Math.min(20, containerElements.length); i++) {
                             const element = containerElements[i];
                             const text = element.textContent.trim();
                             if (text.length > 0 && text.length < 100) {
-                                console.log(`   ${i + 1}. [${element.tagName}] "${text}"`);
                                 if (text.toLowerCase().includes('short')) {
-                                    console.log(`   ^^ This contains 'short' - trying to click it`);
                                     try {
                                         element.click();
                                         foundShorts = true;
                                         await new Promise(resolve => setTimeout(resolve, 1000));
                                         return await confirmCategorySelection();
                                     } catch (error) {
-                                        console.log(`   ^^ Click failed: ${error.message}`);
+                                        // Continue to next element
                                     }
                                 }
                             }
-                        }
-                    }
-                } else {
-                    console.log('🔍 DEBUG: No category container found, showing first 15 clickable elements:');
-                    for (let i = 0; i < Math.min(15, clickableElements.length); i++) {
-                        const element = clickableElements[i];
-                        const text = element.textContent.trim();
-                        if (text.length > 0 && text.length < 100) {
-                            console.log(`   ${i + 1}. [${element.tagName}] "${text}"`);
                         }
                     }
                 }
@@ -1019,18 +951,11 @@ async function fillFields(data) {
         }
         
         async function searchCategoryByTyping(targetCategory) {
-            console.log('🔍 DEBUG: Starting searchCategoryByTyping for:', targetCategory);
-            
             // Get the full category info from data
             const categoryInfo = window.currentListingData?.categoryInfo || {};
             const targetPath = categoryInfo.fullPath || categoryInfo.pathArray?.join(' > ') || '';
             
-            console.log('🔍 DEBUG: Target category:', targetCategory);
-            console.log('🔍 DEBUG: Target path:', targetPath);
-            console.log('🔍 DEBUG: Path array:', categoryInfo.pathArray);
-            
             // Look for the search box in the category dialog
-            console.log('🔍 DEBUG: Looking for category search box...');
             const searchBoxSelectors = [
                 '.se-search-box input',
                 '.se-search-box__field input',
@@ -1043,28 +968,29 @@ async function fillFields(data) {
             for (const selector of searchBoxSelectors) {
                 searchBox = document.querySelector(selector);
                 if (searchBox) {
-                    console.log(`✅ DEBUG: Found search box with selector: ${selector}`);
                     break;
                 }
             }
             
             if (!searchBox) {
-                console.log('❌ DEBUG: No search box found');
+                console.warn('❌ No search box found');
                 return false;
             }
             
             // Clear and type the target category in the search box
-            console.log(`📝 DEBUG: Typing "${targetCategory}" in search box...`);
             searchBox.focus();
             searchBox.value = '';
             
             // Small delay to ensure search box is ready
             await new Promise(resolve => setTimeout(resolve, 100));
             
-            // Use the exact category name from the .com listing (e.g., "Activewear Tops", "Polos")
-            const searchTerm = targetCategory;
-            
-            console.log(`🎯 DEBUG: Searching for exact category: "${searchTerm}"`);
+            // Handle "&" character issue - if category contains "&", search only the first word
+            let searchTerm = targetCategory;
+            if (targetCategory.includes('&')) {
+                // Extract first word before "&" for search
+                searchTerm = targetCategory.split('&')[0].trim();
+                console.warn(`⚠️ Category contains "&" - searching for "${searchTerm}" instead of full "${targetCategory}"`);
+            }
             
             // Method 1: Type character by character with events
             for (let i = 0; i < searchTerm.length; i++) {
@@ -1081,18 +1007,12 @@ async function fillFields(data) {
             searchBox.dispatchEvent(new Event('keyup', { bubbles: true }));
             searchBox.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
             
-            console.log(`✅ DEBUG: Typed "${searchTerm}" in search box`);
-            
             // Method 3: Try pressing Enter key
             searchBox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
             searchBox.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', bubbles: true }));
             searchBox.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
             
-            console.log('⚡ DEBUG: Triggered search with Enter key events');
-            
             // Wait for search results to appear with multiple checks
-            console.log('⏳ DEBUG: Waiting for search results...');
-            
             let searchResultsFound = false;
             let attempts = 0;
             const maxAttempts = 6; // Reduced from 8 to 6 attempts
@@ -1112,19 +1032,14 @@ async function fillFields(data) {
                 for (const selector of resultCheckSelectors) {
                     const results = document.querySelectorAll(selector);
                     if (results.length > 0) {
-                        console.log(`✅ DEBUG: Search results found after ${attempts * 300}ms with selector: ${selector} (${results.length} results)`);
                         searchResultsFound = true;
                         break;
                     }
                 }
-                
-                if (!searchResultsFound) {
-                    console.log(`⏳ DEBUG: Attempt ${attempts}/${maxAttempts} - still waiting for results...`);
-                }
             }
             
             if (!searchResultsFound) {
-                console.log('❌ DEBUG: No search results appeared after typing');
+                console.warn('❌ No search results appeared after typing');
                 return false;
             }
             
@@ -1134,40 +1049,64 @@ async function fillFields(data) {
             ];
             
             let targetResult = null;
-            let bestMatch = { score: 0, element: null, reason: '' };
+            let bestMatch = { score: 0, element: null, reason: '', labelText: '' };
             
             for (const selector of resultSelectors) {
                 const elements = document.querySelectorAll(selector);
-                console.log(`🔍 DEBUG: Found ${elements.length} category options to evaluate`);
                 
                 for (const element of elements) {
                     const label = document.querySelector(`label[for="${element.id}"]`);
                     const labelText = label ? label.textContent : 'Unknown';
-                    console.log(`✅ DEBUG: Evaluating option: ${labelText} (value: ${element.value})`);
                     
-                    // Score this option based on category name and path matching
-                    const score = calculateCategoryMatchScore(labelText, targetCategory, targetPath, categoryInfo);
-                    console.log(`📊 DEBUG: Match score for "${labelText}": ${score.score} (${score.reason})`);
+                    // When searching with partial term due to "&", prioritize exact match to original category
+                    let score;
+                    if (searchTerm !== targetCategory) {
+                        // We searched with partial term, look for exact match to original
+                        if (labelText.toLowerCase().includes(targetCategory.toLowerCase())) {
+                            score = { score: 1000, reason: 'exact match to original category with &' };
+                            console.warn(`🎯 Found exact match for "${targetCategory}": "${labelText}"`);
+                        } else {
+                            // Score this option based on category name and path matching
+                            score = calculateCategoryMatchScore(labelText, targetCategory, targetPath, categoryInfo);
+                        }
+                    } else {
+                        // Normal scoring
+                        score = calculateCategoryMatchScore(labelText, targetCategory, targetPath, categoryInfo);
+                    }
+                    
+                    console.warn(`📊 Score for "${labelText}": ${score.score} (${score.reason})`);
                     
                     if (score.score > bestMatch.score) {
-                        bestMatch = { score: score.score, element: element, reason: score.reason };
-                        console.log(`🎯 DEBUG: New best match: "${labelText}" with score ${score.score}`);
+                        bestMatch = { score: score.score, element: element, reason: score.reason, labelText: labelText };
+                        console.warn(`🏆 New best match: "${labelText}" with score ${score.score}`);
                     }
                 }
             }
             
             if (bestMatch.element) {
                 targetResult = bestMatch.element;
-                const label = document.querySelector(`label[for="${targetResult.id}"]`);
-                const labelText = label ? label.textContent : 'Unknown';
-                console.log(`🏆 DEBUG: Selected best match: "${labelText}" (Score: ${bestMatch.score}, Reason: ${bestMatch.reason})`);
+                
+                // Validate that the selected category matches the intended category
+                const selectedCategoryText = bestMatch.labelText;
+                const isGoodMatch = selectedCategoryText.toLowerCase().includes(targetCategory.toLowerCase()) ||
+                                   targetCategory.toLowerCase().includes(selectedCategoryText.toLowerCase()) ||
+                                   bestMatch.score >= 80; // High confidence score
+                
+                if (!isGoodMatch) {
+                    console.warn(`⚠️ CATEGORY MISMATCH: Selected "${selectedCategoryText}" but intended "${targetCategory}"`);
+                    // Store mismatch info for later alert
+                    window.categoryMismatch = {
+                        intended: targetCategory,
+                        selected: selectedCategoryText,
+                        searchTerm: searchTerm
+                    };
+                }
             } else {
-                console.log('❌ DEBUG: No suitable match found');
+                console.warn('❌ No suitable match found');
                 return false;
             }
             
             // Click the radio button
-            console.log(`👆 DEBUG: Clicking search result: ${targetResult.value}`);
             targetResult.checked = true; // Set as checked
             targetResult.click(); // Also trigger click event
             targetResult.dispatchEvent(new Event('change', { bubbles: true })); // Trigger change event
@@ -1175,23 +1114,13 @@ async function fillFields(data) {
             // Wait a moment for selection to register
             await new Promise(resolve => setTimeout(resolve, 2000));
             
-            // Verify selection
-            if (targetResult.checked) {
-                console.log('✅ DEBUG: Radio button is now checked');
-            } else {
-                console.log('⚠️ DEBUG: Radio button may not be properly selected');
-            }
-            
             // Look for and click Done/Confirm button
-            console.log('🔍 DEBUG: Looking for Done button...');
             const allButtons = document.querySelectorAll('button');
             let doneButtonFound = false;
             
             for (const button of allButtons) {
                 const buttonText = button.textContent.toLowerCase().trim();
-                console.log(`🔍 DEBUG: Found button: "${buttonText}"`);
                 if (buttonText === 'done' || buttonText === 'confirm' || buttonText === 'select') {
-                    console.log('👆 DEBUG: Found and clicking Done button');
                     button.click();
                     doneButtonFound = true;
                     await new Promise(resolve => setTimeout(resolve, 2000));
@@ -1200,10 +1129,9 @@ async function fillFields(data) {
             }
             
             if (!doneButtonFound) {
-                console.log('⚠️ DEBUG: No Done button found, but selection was made');
+                console.warn('⚠️ No Done button found, but selection was made');
             }
             
-            console.log('✅ DEBUG: Category search and selection process completed');
             return true;
             
             // If no search found, try direct text matching
@@ -1581,7 +1509,14 @@ async function fillFields(data) {
             'pocket type': 'pocketType',
             'garment care': 'garmentCare',
             'mpn': 'mpn',
-            'unit type': 'unitType'
+            'unit type': 'unitType',
+            // Additional mappings for common fields that may not be on page
+            'jacket/coat length': 'jacketCoatLength',
+            'jacket lapel style': 'jacketLapelStyle',
+            'lining material': 'liningMaterial',
+            'number of pieces': 'numberOfPieces',
+            'set includes': 'setIncludes',
+            'size type': 'sizeType'
         };
 
         // Process each attribute button found on the page
@@ -1635,7 +1570,7 @@ async function fillFields(data) {
                     console.warn(`⚠️ Failed to fill ${attributeName}:`, error.message);
                 }
             } else {
-                console.log(`📝 Field ${attributeName} found on page but no data in JSON (${jsonProperty})`);
+                console.warn(`📝 Field ${attributeName} found on page but no data in JSON (${jsonProperty})`);
             }
         }
 
@@ -1652,10 +1587,12 @@ async function fillFields(data) {
         
         // Check each JSON property against available page fields
         Object.keys(data).forEach(jsonKey => {
-            // Skip non-attribute fields
+            // Skip non-attribute fields and fields that are commonly not on page
             if (['source', 'templateType', 'title', 'sku', 'priceCAD', 'priceUSD', 
                  'description', 'condition', 'conditionDescription', 'adRate', 
-                 'originalUrl', 'extractedAt', 'category', 'categoryId', 'images'].includes(jsonKey)) {
+                 'originalUrl', 'extractedAt', 'category', 'categoryId', 'images',
+                 'categoryInfo', 'jacketCoatLength', 'jacketLapelStyle', 'liningMaterial',
+                 'numberOfPieces', 'setIncludes', 'sizeType', 'sleeveLength'].includes(jsonKey)) {
                 return;
             }
             
@@ -1701,19 +1638,14 @@ async function fillFields(data) {
             }
         });
 
-        console.log(`🔧 DEBUG: Checking condition data - condition: "${data.condition}", conditionDescription: "${data.conditionDescription}"`);
-
         // Handle condition selection
         // First, check if we need to infer condition from conditionDescription
         if ((!data.condition || data.condition === 'undefined' || data.condition === '') && data.conditionDescription) {
             // If we have a condition description but no condition, default to pre-owned
             data.condition = 'pre-owned';
-            console.log(`🔧 CONDITION: Inferred condition "pre-owned" from conditionDescription`);
         }
 
         if (data.condition && data.condition !== 'undefined' && data.condition !== '') {
-            console.log(`🔧 CONDITION: Processing condition "${data.condition}"`);
-            
             // Create mapping for common condition values
             const conditionMappings = {
                 'new with tags': 'New with tags',
@@ -1732,20 +1664,16 @@ async function fillFields(data) {
             
             const normalizedCondition = data.condition.toLowerCase();
             const mappedCondition = conditionMappings[normalizedCondition] || data.condition;
-            console.log(`🔧 CONDITION: Mapped "${data.condition}" to "${mappedCondition}"`);
             
             // Try to find and click the condition button first
             const conditionButtons = document.querySelectorAll('.condition-recommendation-value');
-            console.log(`🔧 CONDITION: Found ${conditionButtons.length} condition buttons`);
             let conditionSet = false;
             
             for (const button of conditionButtons) {
                 const buttonText = button.textContent.trim();
-                console.log(`🔧 CONDITION: Checking button "${buttonText}" vs "${mappedCondition}"`);
                 if (buttonText === mappedCondition) {
                     button.click();
                     conditionSet = true;
-                    console.log(`✅ CONDITION: Clicked condition button "${mappedCondition}"`);
                     break;
                 }
             }
@@ -1754,20 +1682,17 @@ async function fillFields(data) {
             if (!conditionSet) {
                 const moreOptionsButton = document.querySelector('.condition-recommendation-more-values');
                 if (moreOptionsButton) {
-                    console.log(`🔧 CONDITION: Clicking "..." for more options`);
                     moreOptionsButton.click();
                     
                     // Wait for more options to appear and try again
                     await new Promise(resolve => setTimeout(resolve, 500));
                     
                     const allConditionButtons = document.querySelectorAll('.condition-recommendation-value');
-                    console.log(`🔧 CONDITION: Found ${allConditionButtons.length} condition buttons after clicking "..."`);
                     for (const button of allConditionButtons) {
                         const buttonText = button.textContent.trim();
                         if (buttonText === mappedCondition) {
                             button.click();
                             conditionSet = true;
-                            console.log(`✅ CONDITION: Clicked condition button "${mappedCondition}" from expanded list`);
                             break;
                         }
                     }
@@ -1775,7 +1700,7 @@ async function fillFields(data) {
             }
             
             if (!conditionSet) {
-                console.warn(`⚠️ CONDITION: Could not find condition button for: ${data.condition} (mapped to: ${mappedCondition})`);
+                console.warn(`⚠️ Could not find condition button for: ${data.condition} (mapped to: ${mappedCondition})`);
                 return;
             }
             
@@ -1784,36 +1709,27 @@ async function fillFields(data) {
             
             // Now modify the DOM to show the filled condition state
             const conditionSection = document.querySelector('.smry.summary__condition, .smry.summary--warn.summary__condition');
-            console.log(`🔧 CONDITION: Found condition section:`, conditionSection ? 'YES' : 'NO');
             
             if (conditionSection) {
-                console.log(`🔧 CONDITION: Current classes:`, conditionSection.className);
-                
                 // Remove warning class and update structure
                 conditionSection.classList.remove('summary--warn');
                 conditionSection.classList.add('summary__condition');
-                console.log(`🔧 CONDITION: Updated classes:`, conditionSection.className);
                 
                 // Clear the warning notice
                 const noticeDiv = conditionSection.querySelector('.summary__notice');
                 if (noticeDiv) {
                     noticeDiv.innerHTML = '';
-                    console.log(`✅ CONDITION: Cleared warning notice`);
                 }
                 
                 // Update the condition value button text
                 const conditionValueButton = conditionSection.querySelector('#summary-condition-field-value');
                 if (conditionValueButton) {
                     conditionValueButton.textContent = mappedCondition;
-                    console.log(`✅ CONDITION: Updated button text to "${mappedCondition}"`);
-                } else {
-                    console.warn(`⚠️ CONDITION: Could not find condition value button`);
                 }
                 
-                                // Remove the condition recommendation section and replace with filled structure
+                // Remove the condition recommendation section and replace with filled structure
                 const summaryRow = conditionSection.querySelector('.summary-row');
                 if (summaryRow) {
-                    console.log(`🔧 CONDITION: Found summary-row, updating its content`);
                     try {
                         // Replace the summary-row content with the filled state structure
                         summaryRow.innerHTML = `
@@ -1826,19 +1742,13 @@ async function fillFields(data) {
                                 </div>
                             </div>
                         `;
-                        console.log(`✅ CONDITION: Successfully updated summary-row content`);
                     } catch (error) {
-                        console.warn(`⚠️ CONDITION: Error updating summary-row:`, error);
+                        console.warn(`⚠️ Error updating summary-row:`, error);
                     }
-                } else {
-                    console.log(`🔧 CONDITION: No summary-row found - eBay may have already updated the DOM after clicking condition button`);
                 }
                 
                 // Handle condition description
                 if (data.conditionDescription && !mappedCondition.toLowerCase().includes('new')) {
-                
-                    // Skip trying to modify the DOM structure - just work with eBay's existing elements
-                    console.log(`🔧 CONDITION: Skipping DOM modification, will populate eBay's existing textarea`);
                     
                     // Find and populate the actual condition description textarea that eBay uses
                     setTimeout(() => {
@@ -1847,35 +1757,125 @@ async function fillFields(data) {
                             actualConditionTextarea.value = data.conditionDescription;
                             actualConditionTextarea.dispatchEvent(new Event('input', { bubbles: true }));
                             actualConditionTextarea.dispatchEvent(new Event('change', { bubbles: true }));
-                            console.log(`✅ CONDITION: Populated eBay's condition textarea with "${data.conditionDescription}"`);
                         } else {
-                            console.warn(`⚠️ CONDITION: Could not find eBay's condition textarea`);
+                            console.warn(`⚠️ Could not find eBay's condition textarea`);
                         }
                     }, 1000); // Wait a bit longer for eBay's DOM to update
                 }
-                
-                console.log(`✅ CONDITION: Condition handling completed successfully`);
             } else {
-                console.warn(`⚠️ CONDITION: Could not find condition section to modify`);
+                console.warn(`⚠️ Could not find condition section to modify`);
             }
         }
 
         // Wait a bit more to ensure all async operations are complete
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // Remove loading overlay
-        removeLoadingOverlay();
+        // VALIDATION CHECKS AT THE END OF FORM FILLING
         
-        // Focus on the "Save for later" button
-        const saveForLaterButton = document.querySelector('button[aria-label="Save for later"]');
-        if (saveForLaterButton) {
-            saveForLaterButton.focus();
-            saveForLaterButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // First check for category mismatch
+        if (window.categoryMismatch) {
+            const mismatch = window.categoryMismatch;
+            console.warn(`⚠️ Category mismatch detected: intended "${mismatch.intended}" but selected "${mismatch.selected}"`);
+            
+            // Remove loading overlay first
+            removeLoadingOverlay();
+            
+            const userConfirmed = confirm(
+                `⚠️ CATEGORY MISMATCH DETECTED!\n\n` +
+                `Intended Category: "${mismatch.intended}"\n` +
+                `Selected Category: "${mismatch.selected}"\n` +
+                `Search Term Used: "${mismatch.searchTerm}"\n\n` +
+                `This happened because the "&" character in the category name caused search issues.\n` +
+                `Please verify and manually correct the category if needed.\n\n` +
+                `Click OK to continue, or Cancel to review the category selection.`
+            );
+            
+            if (!userConfirmed) {
+                // Focus on the category field with visual highlight
+                const categoryTrigger = document.querySelector('button[data-testid="category-field-trigger"]') ||
+                                      document.querySelector('.category-picker__trigger') ||
+                                      document.querySelector('[data-testid="category"]') ||
+                                      document.querySelector('.category-field button') ||
+                                      document.querySelector('button[aria-label*="category"]');
+                
+                if (categoryTrigger) {
+                    categoryTrigger.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    categoryTrigger.focus();
+                    categoryTrigger.style.border = '3px solid red';
+                    categoryTrigger.style.backgroundColor = '#ffe6e6';
+                    setTimeout(() => {
+                        categoryTrigger.style.border = '';
+                        categoryTrigger.style.backgroundColor = '';
+                    }, 5000);
+                    console.warn('🎯 Category field focused for user review');
+                } else {
+                    console.warn('⚠️ Category field not found for focus');
+                }
+                
+                // Clear the mismatch flag and stop execution
+                delete window.categoryMismatch;
+                isCurrentlyFilling = false;
+                return;
+            }
+            
+            // Clear the mismatch flag if user confirmed
+            delete window.categoryMismatch;
+        }
+
+        // Check for country of manufacture - required field enforcement (at the end)
+        const hasCountryOfManufacture = data.countryRegionOfManufacture || 
+                                       data.countryOfManufacture || 
+                                       data['country/region of manufacture'] ||
+                                       data.country;
+        
+        if (!hasCountryOfManufacture) {
+            console.warn('⚠️ No country of manufacture found in data - this is required information');
+            
+            // Remove loading overlay first
+            removeLoadingOverlay();
+            
+            // Show warning dialog that requires acknowledgment
+            const userConfirmed = confirm(
+                '⚠️ WARNING: Country of Manufacture Missing!\n\n' +
+                'This is a key piece of information required for eBay listings.\n' +
+                'You will need to manually fill this field before publishing.\n\n' +
+                'Click OK to continue and focus on the images panel,\n' +
+                'or Cancel to stop the auto-fill process.'
+            );
+            
+            if (!userConfirmed) {
+                console.warn('❌ User cancelled auto-fill due to missing country of manufacture');
+                isCurrentlyFilling = false;
+                return;
+            }
         } else {
-            // Fallback to title input if save button not found
-            if (titleInput) {
-                titleInput.focus();
-                titleInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Remove loading overlay if country of manufacture is present
+            removeLoadingOverlay();
+        }
+        
+        // Focus on the images panel (div class=uploader-ui)
+        const imagesPanel = document.querySelector('div.uploader-ui, .uploader-ui, [data-testid="uploader-ui"], .photo-upload, .image-upload');
+        if (imagesPanel) {
+            console.warn('📸 Focusing on images panel for user attention');
+            imagesPanel.focus();
+            imagesPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            
+            // Add a subtle highlight to draw attention to the images area
+            const originalBorder = imagesPanel.style.border;
+            imagesPanel.style.border = '3px solid #ff6b35';
+            imagesPanel.style.transition = 'border 0.3s ease';
+            
+            // Remove highlight after 3 seconds
+            setTimeout(() => {
+                imagesPanel.style.border = originalBorder;
+            }, 3000);
+        } else {
+            console.warn('⚠️ Could not find images panel to focus on');
+            // Fallback to title input if images panel not found
+            const titleInputFinal = document.querySelector('input[name="title"]');
+            if (titleInputFinal) {
+                titleInputFinal.focus();
+                titleInputFinal.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
         }
         
@@ -2114,10 +2114,8 @@ async function uploadSingleImage(imageUrl, uploadElement) {
 }
 
 async function urlToFile(imageUrl) {
-    try {
-        console.log('🌐 Requesting image from background script:', imageUrl);
-        
-        // Send message to background script to fetch the image
+        try {
+            console.warn('🌐 Requesting image from background script:', imageUrl);        // Send message to background script to fetch the image
         return new Promise((resolve, reject) => {
             chrome.runtime.sendMessage({
                 action: 'fetchImageAsBlob',
@@ -2152,7 +2150,7 @@ async function urlToFile(imageUrl) {
                             const originalWidth = img.width;
                             const originalHeight = img.height;
                             
-                            console.log(`📏 Image dimensions: ${originalWidth}x${originalHeight}`);
+                            console.warn(`📏 Image dimensions: ${originalWidth}x${originalHeight}`);
                             
                             // Skip images that are too small (thumbnails from expired listings)
                             if (originalWidth < 100 || originalHeight < 100) {
@@ -2284,19 +2282,17 @@ chrome.runtime.onMessage.addListener((msg) => {
     // Add timestamp to prevent rapid duplicate calls
     const now = Date.now();
     if (window.lastFillTimestamp && (now - window.lastFillTimestamp) < 2000) {
-        console.log('⚠️ Ignoring duplicate fill request (too soon after last request)');
+        console.warn('⚠️ Ignoring duplicate fill request (too soon after last request)');
         return;
     }
 
     if (msg.action === 'update' || msg.action === 'fillForm') {
-        console.log('🔄 Filling eBay.ca form with bridged data. Keys:', Object.keys(msg.data));
         window.lastFillTimestamp = now;
         fillFields(msg.data);
     } else if (msg.action === 'save') {
         window.lastFillTimestamp = now;
         fillFields(msg.data).then(saveDraft);
     } else if (msg.action === 'extractedEbayComData') {
-        console.log('📦 Received extracted eBay.com data in content script');
         // This is for manual popup workflow - just log for now
     }
 });
@@ -2306,15 +2302,12 @@ window.addEventListener('message', function(event) {
     if (event.source !== window) return;
     
     if (event.data.source === 'EBAY_US_CA_BRIDGE_TRIGGER') {
-        console.log('🌉 Received bridge trigger, loading saved data...');
-        
         // Get the saved JSON data from storage and fill the form
         chrome.storage.local.get('latestEbayJson', ({ latestEbayJson }) => {
             if (latestEbayJson) {
-                console.log('📦 Found saved data, filling form:', latestEbayJson);
                 fillFields(latestEbayJson);
             } else {
-                console.log('❌ No saved data found for bridging');
+                console.error('❌ No saved data found for bridging');
             }
         });
     }
@@ -2329,24 +2322,21 @@ document.addEventListener('keydown', function(event) {
         // Throttle rapid keyboard shortcuts
         const now = Date.now();
         if (window.lastKeyboardShortcut && (now - window.lastKeyboardShortcut) < 1000) {
-            console.log('⚠️ Keyboard shortcut throttled (too rapid)');
+            console.warn('⚠️ Keyboard shortcut throttled (too rapid)');
             event.preventDefault();
             return;
         }
         window.lastKeyboardShortcut = now;
         
         event.preventDefault();
-        console.log('⌨️ Keyboard shortcut triggered (Cmd/Ctrl + Period)');
         
         const currentUrl = window.location.href;
         
         // Determine action based on current page
         if (currentUrl.includes('ebay.ca') && currentUrl.includes('/lstng')) {
             // eBay.ca listing page - Fill form with saved data
-            console.log('🇨🇦 eBay.ca listing detected - filling form with saved data');
             chrome.storage.local.get('latestEbayJson', ({ latestEbayJson }) => {
                 if (latestEbayJson) {
-                    console.log('📦 Found saved data, filling form');
                     fillFields(latestEbayJson);
                 } else {
                     alert('⚠️ No saved JSON data found. Please extract data from an eBay.com listing first.');
@@ -2355,26 +2345,22 @@ document.addEventListener('keydown', function(event) {
             
         } else if (currentUrl.includes('ebay.com') && (currentUrl.includes('/lstng') || currentUrl.includes('/sl/list'))) {
             // eBay.com listing page - Extract data and bridge to eBay.ca
-            console.log('🇺🇸 eBay.com listing detected - extracting data and bridging to eBay.ca');
             
             // Start the extraction with keyboard shortcut flag
-            console.log('📤 Sending extraction request with keyboard shortcut flag');
             chrome.runtime.sendMessage({ 
                 action: "extractEbayComListing",
                 fromKeyboardShortcut: true 
             }, (response) => {
-                console.log('📥 Response from background script:', response);
+                // Response handled silently
             });
             
         } else if (currentUrl.includes('ebay.com') && currentUrl.includes('/itm/')) {
             // eBay.com item page - Navigate to edit mode
-            console.log('📦 eBay.com item detected - navigating to edit mode');
             const itemIdMatch = currentUrl.match(/\/itm\/(\d+)/);
             
             if (itemIdMatch) {
                 const itemId = itemIdMatch[1];
                 const editUrl = `https://www.ebay.com/sl/list?itemId=${itemId}&mode=ReviseItem`;
-                console.log('🔄 Navigating to edit mode:', editUrl);
                 window.location.href = editUrl;
             } else {
                 alert('❌ Could not extract item ID from URL');
@@ -2382,7 +2368,6 @@ document.addEventListener('keydown', function(event) {
             
         } else if (currentUrl.includes('chatgpt.com')) {
             // ChatGPT page - Extract JSON and create listing
-            console.log('🤖 ChatGPT detected - extracting JSON');
             chrome.runtime.sendMessage({ action: "extractJsonFromChatGPT" });
             
         } else {
