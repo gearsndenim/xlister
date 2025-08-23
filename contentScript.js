@@ -14,6 +14,42 @@ async function waitForSelector(selector, timeout = 4000) {
     });
 }
 
+async function waitForIframeReady(iframe, timeout = 5000) {
+    return new Promise((resolve, reject) => {
+        const checkIframe = () => {
+            try {
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                if (iframeDoc && iframeDoc.readyState === 'complete' && iframeDoc.body) {
+                    const editableDiv = iframeDoc.querySelector('div[contenteditable="true"]');
+                    if (editableDiv) {
+                        resolve(editableDiv);
+                        return true;
+                    }
+                }
+            } catch (error) {
+                // Iframe not ready yet
+            }
+            return false;
+        };
+
+        // Check immediately
+        if (checkIframe()) return;
+
+        // Set up interval check
+        const interval = setInterval(() => {
+            if (checkIframe()) {
+                clearInterval(interval);
+            }
+        }, 100);
+
+        // Set timeout
+        setTimeout(() => {
+            clearInterval(interval);
+            reject(new Error('Timeout waiting for iframe to be ready'));
+        }, timeout);
+    });
+}
+
 async function fillDropdown(buttonSelector, searchInputSelector, value) {
     const button = document.querySelector(buttonSelector);
     if (!button) return;
@@ -124,14 +160,147 @@ async function fillFields(data) {
             priceInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
 
-        if (descTextarea && data.description) {
+        // Handle description field (rich text editor)
+        if (data.description) {
+            console.log('📝 Setting description field...');
+            
             // Add bridge notice for eBay.ca listings
             let description = data.description;
             if (isEbayCA && data.originalUrl) {
                 description += `\n\n--- Bridged from eBay.com ---\nOriginal listing: ${data.originalUrl}`;
             }
-            descTextarea.value = description;
-            descTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+            
+            let descriptionSet = false;
+            
+            // Method 1: Try the rich text editor iframe approach first
+            const descriptionIframe = document.querySelector('iframe[id*="se-rte-frame"]');
+            if (descriptionIframe) {
+                console.log('📝 Found description iframe, waiting for it to be ready...');
+                try {
+                    // Wait for iframe to be fully loaded and contenteditable div to be available
+                    const editableDiv = await waitForIframeReady(descriptionIframe);
+                    
+                    console.log('✅ Found contenteditable div in iframe');
+                    
+                    // Set the content (convert newlines to <br> for HTML)
+                    const htmlDescription = description.replace(/\n/g, '<br>');
+                    editableDiv.innerHTML = htmlDescription;
+                    
+                    // Remove placeholder class if it exists
+                    editableDiv.classList.remove('placeholder');
+                    
+                    // Focus the field first to simulate user interaction
+                    editableDiv.focus();
+                    
+                    // Wait a bit for focus to register
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    // Trigger events on the contenteditable div
+                    editableDiv.dispatchEvent(new Event('input', { bubbles: true }));
+                    editableDiv.dispatchEvent(new Event('change', { bubbles: true }));
+                    
+                    // Wait a bit more before blurring to ensure the content is registered
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    
+                    // Blur the field to trigger eBay's auto-save API call
+                    editableDiv.blur();
+                    editableDiv.dispatchEvent(new Event('blur', { bubbles: true }));
+                    
+                    console.log('✅ Triggered focus/blur sequence to activate eBay auto-save');
+                    
+                    // Also trigger events on the iframe itself
+                    descriptionIframe.dispatchEvent(new Event('input', { bubbles: true }));
+                    descriptionIframe.dispatchEvent(new Event('change', { bubbles: true }));
+                    
+                    // Also update the hidden textarea to ensure synchronization
+                    const hiddenTextarea = document.querySelector('textarea[name="description"]');
+                    if (hiddenTextarea) {
+                        hiddenTextarea.value = description;
+                        hiddenTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+                        hiddenTextarea.dispatchEvent(new Event('change', { bubbles: true }));
+                        hiddenTextarea.dispatchEvent(new Event('blur', { bubbles: true }));
+                        console.log('✅ Also updated hidden textarea for synchronization');
+                    }
+                    
+                    // Wait a bit more to allow the API call to complete
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    console.log('✅ Description set in iframe successfully with auto-save trigger');
+                    descriptionSet = true;
+                    
+                } catch (error) {
+                    console.warn('⚠️ Error waiting for iframe to be ready:', error);
+                }
+            }
+            
+            // Method 2: Fallback to hidden textarea if iframe method fails
+            if (!descriptionSet) {
+                const descTextarea = document.querySelector('textarea[name="description"]');
+                if (descTextarea) {
+                    console.log('📝 Using fallback textarea method');
+                    descTextarea.value = description;
+                    descTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+                    descTextarea.dispatchEvent(new Event('change', { bubbles: true }));
+                    descriptionSet = true;
+                }
+            }
+            
+            // Method 3: Try other possible selectors
+            if (!descriptionSet) {
+                console.log('🔍 Trying alternative description selectors...');
+                const alternativeSelectors = [
+                    'textarea[data-testid="richEditor"]',
+                    'textarea[placeholder*="description"]',
+                    'div[contenteditable="true"]'
+                ];
+                
+                for (const selector of alternativeSelectors) {
+                    const element = document.querySelector(selector);
+                    if (element) {
+                        console.log(`📝 Found description element with selector: ${selector}`);
+                        
+                        if (element.tagName.toLowerCase() === 'textarea') {
+                            element.value = description;
+                            element.dispatchEvent(new Event('input', { bubbles: true }));
+                            element.dispatchEvent(new Event('change', { bubbles: true }));
+                        } else if (element.contentEditable === 'true') {
+                            element.innerHTML = description.replace(/\n/g, '<br>');
+                            element.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                        
+                        descriptionSet = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (!descriptionSet) {
+                console.warn('⚠️ Could not find any description field to populate');
+            } else {
+                // Additional step: Check if eBay's auto-save system is active and try to trigger it
+                console.log('🔄 Checking for eBay auto-save system...');
+                
+                // Look for signs that eBay has an auto-save mechanism
+                setTimeout(async () => {
+                    try {
+                        // Try to find the description field again and trigger one more blur event
+                        const iframe = document.querySelector('iframe[id*="se-rte-frame"]');
+                        if (iframe) {
+                            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                            const editableDiv = iframeDoc?.querySelector('div[contenteditable="true"]');
+                            if (editableDiv) {
+                                // One final focus/blur cycle to ensure auto-save is triggered
+                                editableDiv.focus();
+                                await new Promise(resolve => setTimeout(resolve, 100));
+                                editableDiv.blur();
+                                console.log('✅ Final auto-save trigger completed');
+                            }
+                        }
+                    } catch (error) {
+                        console.log('ℹ️ Final auto-save trigger failed (this may be normal)');
+                    }
+                }, 1000); // Wait 1 second after the main operation
+            }
         }
 
         if (conditionTextarea && data.conditionDescription) {
