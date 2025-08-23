@@ -153,11 +153,91 @@ async function selectSingleValue(input, value, selectedCount) {
     }
 }
 
+function calculateCategoryMatchScore(labelText, targetCategory, targetPath, categoryInfo) {
+    let score = 0;
+    let reasons = [];
+    
+    const labelLower = labelText.toLowerCase();
+    const targetLower = targetCategory.toLowerCase();
+    const targetPathLower = targetPath?.toLowerCase() || '';
+    
+    // 1. Category name matching (most important)
+    if (labelLower === targetLower) {
+        score += 100;
+        reasons.push('exact category name match');
+    } else if (labelLower.includes(targetLower)) {
+        score += 80;
+        reasons.push('partial category name match');
+    } else if (targetLower.includes(labelLower)) {
+        score += 60;
+        reasons.push('category name contains match');
+    }
+    
+    // 2. Gender/department matching (very important for disambiguation)
+    if (targetPathLower) {
+        if (targetPathLower.includes('men') && !targetPathLower.includes('women')) {
+            // This is a men's item
+            if (labelLower.includes('men') && !labelLower.includes('women')) {
+                score += 50;
+                reasons.push('men\'s category match');
+            } else if (labelLower.includes('women') || labelLower.includes('ladies')) {
+                score -= 50; // Penalty for wrong gender
+                reasons.push('wrong gender (women vs men)');
+            }
+        } else if (targetPathLower.includes('women') || targetPathLower.includes('ladies')) {
+            // This is a women's item
+            if (labelLower.includes('women') || labelLower.includes('ladies')) {
+                score += 50;
+                reasons.push('women\'s category match');
+            } else if (labelLower.includes('men') && !labelLower.includes('women')) {
+                score -= 50; // Penalty for wrong gender
+                reasons.push('wrong gender (men vs women)');
+            }
+        }
+        
+        // 3. Other path elements matching
+        const pathElements = targetPathLower.split(' > ').map(p => p.trim());
+        for (const element of pathElements) {
+            if (element.length > 3 && labelLower.includes(element)) {
+                score += 10;
+                reasons.push(`path element match: ${element}`);
+            }
+        }
+    }
+    
+    // 4. Specific category type matching
+    if (categoryInfo.pathArray) {
+        const pathArray = categoryInfo.pathArray.map(p => p.toLowerCase());
+        
+        // Check for specific subcategories in the path
+        if (pathArray.includes('activewear') && labelLower.includes('activewear')) {
+            score += 30;
+            reasons.push('activewear subcategory match');
+        }
+        if (pathArray.includes('shirts') && labelLower.includes('shirt')) {
+            score += 20;
+            reasons.push('shirts subcategory match');
+        }
+        if (pathArray.includes('clothing') && labelLower.includes('clothing')) {
+            score += 10;
+            reasons.push('clothing category match');
+        }
+    }
+    
+    return {
+        score: Math.max(0, score), // Don't allow negative scores
+        reason: reasons.join(', ') || 'no specific matches'
+    };
+}
+
 async function fillFields(data) {
     // Prevent duplicate execution with better checking
     if (isCurrentlyFilling) {
         return;
     }
+    
+    // Store the current listing data globally for category matching
+    window.currentListingData = data;
     
     // Additional protection: check if we recently processed the same data
     const dataHash = JSON.stringify(data).substring(0, 100); // Simple hash
@@ -282,22 +362,923 @@ async function fillFields(data) {
             priceInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
 
-        // Handle category selection
-        if (data.category || data.categoryId) {
-            // Clean up category text for better matching
-            let categoryToMatch = data.category;
-            if (categoryToMatch) {
-                categoryToMatch = categoryToMatch
-                    .replace(/–/g, '-') // Replace em dash with regular dash
-                    .replace(/—/g, '-') // Replace em dash with regular dash
-                    .trim();
+        // Enhanced category handling with smart navigation for both eBay and Store categories
+        if (data.categoryInfo || data.category || data.categoryId) {
+            await handleCategorySelection(data);
+        } else {
+            console.log('⚠️ No category information found in data to set');
+        }
+
+        // Continue with rest of form filling after category is set
+        console.log('🎯 Category handling complete, continuing with other form fields...');
+
+        // Handle description field (rich text editor)
+        if (data.description) {
+            console.log('📝 Setting description field...');
+            let description = data.description;
+            let descriptionSet = false;
+            
+            // Method 1: Try the rich text editor iframe approach first
+            const descriptionIframe = document.querySelector('iframe[id*="se-rte-frame"]');
+            if (descriptionIframe) {
+                try {
+                    // Wait for iframe to be fully loaded and contenteditable div to be available
+                    const editableDiv = await waitForIframeReady(descriptionIframe);
+                    
+                    // Set the content (convert newlines to <br> for HTML)
+                    const htmlDescription = description.replace(/\n/g, '<br>');
+                    editableDiv.innerHTML = htmlDescription;
+                    
+                    // Remove placeholder class if it exists
+                    editableDiv.classList.remove('placeholder');
+                    
+                    // Focus the field first to simulate user interaction
+                    editableDiv.focus();
+                    
+                    // Wait a bit for focus to register
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    // Trigger events on the contenteditable div
+                    editableDiv.dispatchEvent(new Event('input', { bubbles: true }));
+                    editableDiv.dispatchEvent(new Event('change', { bubbles: true }));
+                    
+                    // Wait a bit more before blurring to ensure the content is registered
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    
+                    // Blur the field to trigger eBay's auto-save API call
+                    editableDiv.blur();
+                    editableDiv.dispatchEvent(new Event('blur', { bubbles: true }));
+                    
+                    // Also trigger events on the iframe itself
+                    descriptionIframe.dispatchEvent(new Event('input', { bubbles: true }));
+                    descriptionIframe.dispatchEvent(new Event('change', { bubbles: true }));
+                    
+                    // Also update the hidden textarea to ensure synchronization
+                    const hiddenTextarea = document.querySelector('textarea[name="description"]');
+                    if (hiddenTextarea) {
+                        hiddenTextarea.value = description;
+                        hiddenTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+                        hiddenTextarea.dispatchEvent(new Event('change', { bubbles: true }));
+                        hiddenTextarea.dispatchEvent(new Event('blur', { bubbles: true }));
+                    }
+                    
+                    // Wait a bit more to allow the API call to complete
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    descriptionSet = true;
+                    console.log('✅ Description set via iframe method');
+                    
+                } catch (error) {
+                    console.warn('⚠️ Error waiting for iframe to be ready:', error);
+                }
             }
+            
+            // Method 2: Fallback to hidden textarea if iframe method fails
+            if (!descriptionSet) {
+                const descTextarea = document.querySelector('textarea[name="description"]');
+                if (descTextarea) {
+                    descTextarea.value = description;
+                    descTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+                    descTextarea.dispatchEvent(new Event('change', { bubbles: true }));
+                    descriptionSet = true;
+                    console.log('✅ Description set via textarea fallback');
+                }
+            }
+            
+            if (!descriptionSet) {
+                console.log('⚠️ Could not find description field to set');
+            }
+        }
+
+        // Handle condition field
+        if (data.condition || data.itemConditionDescription) {
+            console.log('📋 Setting condition field...');
+            const conditionText = data.itemConditionDescription || data.condition || 'Pre-owned';
+            const conditionTextarea = document.querySelector('textarea[name="itemConditionDescription"]');
+            if (conditionTextarea) {
+                conditionTextarea.value = conditionText;
+                conditionTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+                conditionTextarea.dispatchEvent(new Event('change', { bubbles: true }));
+                console.log('✅ Condition set:', conditionText);
+            }
+        }
+
+        // Handle other form fields
+        console.log('🔧 Setting other form fields...');
+        
+        // Set quantity if provided
+        if (data.quantity) {
+            const quantityInput = document.querySelector('input[name="quantity"], input[name="qty"]');
+            if (quantityInput) {
+                quantityInput.value = data.quantity;
+                quantityInput.dispatchEvent(new Event('input', { bubbles: true }));
+                quantityInput.dispatchEvent(new Event('change', { bubbles: true }));
+                console.log('✅ Quantity set:', data.quantity);
+            }
+        }
+
+        console.log('✅ Form filling completed successfully!');
+
+        async function handleCategorySelection(data) {
+            console.log('🎯 Starting enhanced category selection process');
+            console.log('🔍 Category data:', data.categoryInfo);
+            
+            // Handle both eBay categories and Store categories
+            let targetProductCategory = null;
+            let targetStoreCategory = null;
+            let categoryPath = null;
+            let isInferred = false;
+            
+            if (data.categoryInfo) {
+                targetProductCategory = data.categoryInfo.category;
+                targetStoreCategory = data.categoryInfo.storeCategory;
+                categoryPath = data.categoryInfo.path;
+                isInferred = data.categoryInfo.inferred || false;
+                console.log('📍 Using enhanced category info:', {
+                    productCategory: targetProductCategory,
+                    storeCategory: targetStoreCategory,
+                    path: categoryPath,
+                    inferred: isInferred
+                });
+            } else if (data.category) {
+                // Try to determine if this is a store category or product category
+                if (isStoreCategory(data.category)) {
+                    targetStoreCategory = data.category;
+                    console.log('🏪 Using simple store category:', targetStoreCategory);
+                } else {
+                    targetProductCategory = data.category;
+                    console.log('📦 Using simple product category:', targetProductCategory);
+                }
+            }
+            
+            // Handle eBay product category first (main category)
+            if (targetProductCategory) {
+                if (!isValidProductCategory(targetProductCategory)) {
+                    console.log('🚫 Product category appears to be invalid:', targetProductCategory);
+                } else {
+                    console.log('🎯 Setting eBay product category:', targetProductCategory);
+                    console.log('📊 Category validation passed for:', targetProductCategory);
+                    
+                    // Clean up category text for better matching
+                    const cleanedCategory = targetProductCategory
+                        .replace(/–/g, '-')
+                        .replace(/—/g, '-')
+                        .trim();
+                    
+                    console.log('🧹 Cleaned category text:', cleanedCategory);
+                    console.log('🗺️ Category path available:', categoryPath);
+                    
+                    const success = await navigateToCategory(cleanedCategory, categoryPath);
+                    if (!success) {
+                        console.log('⚠️ Could not navigate to product category, trying fallback methods');
+                        await fallbackCategorySelection(cleanedCategory);
+                    } else {
+                        console.log('✅ Successfully navigated to product category:', cleanedCategory);
+                    }
+                }
+            }
+            
+            // Store category handling (optional - only if provided)
+            if (targetStoreCategory) {
+                console.log('🏪 Setting store category:', targetStoreCategory);
+                await handleStoreCategory(targetStoreCategory);
+            } else {
+                console.log('📝 No store category provided, continuing with eBay product category only');
+            }
+            
+            if (!targetProductCategory && !targetStoreCategory) {
+                console.log('⚠️ No valid category information available - skipping category selection');
+                return;
+            }
+        }
+        
+        function isStoreCategory(category) {
+            if (!category) return false;
+            
+            const storeCategoryPatterns = [
+                /^0[-–]30\s*days?$/i,
+                /^31[-–]60\s*days?$/i,
+                /^61[-–]90\s*days?$/i,
+                /^91[-–]120\s*days?$/i,
+                /^121[-–]180\s*days?$/i,
+                /^181\+?\s*days?$/i
+            ];
+            
+            return storeCategoryPatterns.some(pattern => pattern.test(category.trim()));
+        }
+        
+        async function handleStoreCategory(storeCategory) {
+            // Look for store category selection elements
+            const storeCategoryButton = document.querySelector('button[name="primaryStoreCategoryId"], button[name="storeCategoryId"]');
+            if (storeCategoryButton) {
+                console.log('� Found store category button, setting:', storeCategory);
+                storeCategoryButton.click();
+                await new Promise(resolve => setTimeout(resolve, 800));
+                
+                // Look for radio buttons with store category options
+                const radioOptions = document.querySelectorAll('input[name="primaryStoreCategoryId"][type="radio"]');
+                let categorySelected = false;
+                
+                console.log(`🔍 Found ${radioOptions.length} store category radio options`);
+                
+                for (const radio of radioOptions) {
+                    const label = document.querySelector(`label[for="${radio.id}"]`);
+                    if (label) {
+                        const labelText = label.textContent.trim();
+                        // Check if this label matches our store category with flexible matching
+                        const normalizedLabel = labelText.replace(/[-–—]/g, '-').toLowerCase();
+                        const normalizedTarget = storeCategory.replace(/[-–—]/g, '-').toLowerCase();
+                        
+                        console.log(`🔍 Checking store category option: "${labelText}"`);
+                        
+                        if (normalizedLabel === normalizedTarget ||
+                            labelText === storeCategory ||
+                            labelText.includes(storeCategory) ||
+                            storeCategory.includes(labelText)) {
+                            
+                            radio.click();
+                            await new Promise(resolve => setTimeout(resolve, 200));
+                            
+                            const doneButton = document.querySelector('button[_track="1.primaryStoreCategoryId.2.Done"]');
+                            if (doneButton) {
+                                doneButton.click();
+                                console.log('✅ Selected store category:', labelText);
+                                categorySelected = true;
+                                await new Promise(resolve => setTimeout(resolve, 1000));
+                            }
+                            break;
+                        }
+                    }
+                }
+                
+                if (!categorySelected) {
+                    console.log('🔍 Exact match not found, trying numeric range matching');
+                    
+                    // Extract the numeric range from the target (e.g., "91-120" from "91-120 days")
+                    const targetMatch = storeCategory.match(/(\d+)[-–](\d+)/);
+                    if (targetMatch) {
+                        const targetStart = parseInt(targetMatch[1]);
+                        const targetEnd = parseInt(targetMatch[2]);
+                        console.log(`🔢 Looking for range ${targetStart}-${targetEnd}`);
+                        
+                        for (const radio of radioOptions) {
+                            const label = document.querySelector(`label[for="${radio.id}"]`);
+                            if (label) {
+                                const labelText = label.textContent.trim();
+                                const labelMatch = labelText.match(/(\d+)[-–](\d+)/);
+                                
+                                if (labelMatch) {
+                                    const labelStart = parseInt(labelMatch[1]);
+                                    const labelEnd = parseInt(labelMatch[2]);
+                                    
+                                    if (labelStart === targetStart && labelEnd === targetEnd) {
+                                        console.log(`✅ Found numeric match: "${labelText}" for "${storeCategory}"`);
+                                        radio.click();
+                                        await new Promise(resolve => setTimeout(resolve, 200));
+                                        
+                                        const doneButton = document.querySelector('button[_track="1.primaryStoreCategoryId.2.Done"]');
+                                        if (doneButton) {
+                                            doneButton.click();
+                                            console.log('✅ Selected store category via numeric match:', labelText);
+                                            categorySelected = true;
+                                            await new Promise(resolve => setTimeout(resolve, 1000));
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if (!categorySelected) {
+                    console.log('⚠️ Store category not found in available options. Available options:');
+                    for (const radio of radioOptions) {
+                        const label = document.querySelector(`label[for="${radio.id}"]`);
+                        if (label) {
+                            console.log(`   - "${label.textContent.trim()}"`);
+                        }
+                    }
+                    
+                    console.log('🔧 Closing store category dialog without selection');
+                    const doneButton = document.querySelector('button[_track="1.primaryStoreCategoryId.2.Done"]');
+                    if (doneButton) {
+                        doneButton.click();
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    }
+                }
+            } else {
+                console.log('⚠️ Store category button not found');
+            }
+        }
+        
+        function isValidProductCategory(category) {
+            if (!category || typeof category !== 'string' || category.length < 3) {
+                return false;
+            }
+            
+            // Store categories are valid but handled separately
+            if (isStoreCategory(category)) {
+                return false; // It's a store category, not a product category
+            }
+            
+            // Filter out patterns that are clearly not product categories
+            const invalidPatterns = [
+                /^(immediate|same day|next day|business day)$/i,
+                /^(no returns?|returns? accepted)$/i,
+                /^(free|paid|calculated)$/i,
+                /^(good|very good|excellent|new|used|pre-owned)$/i,
+                /^(auction|buy it now|fixed price)$/i,
+                /^(fast|standard|expedited|economy|overnight)$/i,
+                /^(paypal|credit card|cash|check)$/i,
+                /^\$\d+/i, // Prices starting with $
+                /^\d+\.\d+$/i, // Decimal numbers
+                /^(yes|no|n\/a|tbd|pending)$/i,
+                /^(select|choose|edit|done|cancel|save)$/i
+            ];
+            
+            for (const pattern of invalidPatterns) {
+                if (pattern.test(category.trim())) {
+                    return false;
+                }
+            }
+            
+            // Additional keyword-based filtering (but not including "days" since we handle store categories separately)
+            const categoryLower = category.toLowerCase();
+            const invalidKeywords = [
+                'return policy', 'shipping', 'payment',
+                'condition', 'format', 'duration', 'location', 'quantity'
+            ];
+            
+            for (const keyword of invalidKeywords) {
+                if (categoryLower.includes(keyword)) {
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+        
+        async function navigateToCategory(targetCategory, categoryPath) {
+            // Step 1: Find and click the category selection button
+            const categoryButton = await findCategoryButton();
+            if (!categoryButton) {
+                console.log('❌ Could not find category selection button');
+                return false;
+            }
+            
+            console.log('🔍 Found category button, clicking to open selection');
+            categoryButton.click();
+            await new Promise(resolve => setTimeout(resolve, 600)); // Reduced from 1000ms to 600ms
+            
+            // Step 2: Navigate through the category hierarchy
+            if (categoryPath && categoryPath.length > 0) {
+                console.log('🗺️ Attempting to navigate through category path:', categoryPath);
+                return await navigateCategoryPath(categoryPath);
+            } else {
+                console.log('🔍 Searching for direct category match:', targetCategory);
+                return await searchForCategory(targetCategory);
+            }
+        }
+        
+        async function findCategoryButton() {
+            const selectors = [
+                'button[name="categoryId"]',
+                'button[aria-label*="Category"]',
+                'button[aria-label*="category"]',
+                'button[name="primaryStoreCategoryId"]',
+                'button[name="storeCategoryId"]',
+                '.category-selector button',
+                '[data-testid="category-selector"] button'
+            ];
+            
+            console.log('🔍 Searching for category button with selectors...');
+            
+            for (const selector of selectors) {
+                const button = document.querySelector(selector);
+                if (button) {
+                    console.log('✅ Found category button with selector:', selector);
+                    console.log('📝 Button text:', button.textContent.trim());
+                    console.log('🔍 Button name attribute:', button.getAttribute('name'));
+                    return button;
+                }
+            }
+            
+            console.log('❌ No category button found with any selector');
+            return null;
+        }
+        
+        async function navigateCategoryPath(categoryPath) {
+            try {
+                for (let i = 0; i < categoryPath.length; i++) {
+                    const categoryName = categoryPath[i];
+                    console.log(`🔍 Looking for category level ${i + 1}: "${categoryName}"`);
+                    
+                    // Look for category options at current level
+                    const categoryFound = await selectCategoryAtLevel(categoryName);
+                    
+                    if (!categoryFound) {
+                        console.log(`⚠️ Could not find category "${categoryName}" at level ${i + 1}`);
+                        return false;
+                    }
+                    
+                    // Wait for next level to load if not at the end
+                    if (i < categoryPath.length - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 800));
+                    }
+                }
+                
+                // After navigating the full path, confirm the selection
+                return await confirmCategorySelection();
+                
+            } catch (error) {
+                console.error('❌ Error navigating category path:', error);
+                return false;
+            }
+        }
+        
+        async function selectCategoryAtLevel(categoryName) {
+            console.log(`🔍 Searching for category "${categoryName}" at current level`);
+            
+            // Look for various category selection elements
+            const allElements = document.querySelectorAll(
+                'input[type="radio"], a, button, li, [role="option"], label'
+            );
+            
+            console.log(`📊 Found ${allElements.length} potential category elements`);
+            
+            // Log first few options for debugging
+            console.log('🔍 Available category options:');
+            for (let i = 0; i < Math.min(10, allElements.length); i++) {
+                const element = allElements[i];
+                const text = element.textContent.trim();
+                if (text.length > 0 && text.length < 100) {
+                    console.log(`   ${i + 1}. "${text}"`);
+                }
+            }
+            
+            // Try exact matches first
+            for (const element of allElements) {
+                const text = element.textContent.trim();
+                if (text === categoryName) {
+                    console.log('✅ Found exact match for category:', categoryName);
+                    
+                    // If it's a label for a radio button, click the radio button instead
+                    if (element.tagName === 'LABEL' && element.getAttribute('for')) {
+                        const radioId = element.getAttribute('for');
+                        const radio = document.getElementById(radioId);
+                        if (radio) {
+                            console.log('🔘 Clicking associated radio button');
+                            radio.click();
+                        } else {
+                            element.click();
+                        }
+                    } else {
+                        console.log('👆 Clicking element directly');
+                        element.click();
+                    }
+                    return true;
+                }
+            }
+            
+            // Try partial matches
+            console.log('🔍 No exact match found, trying partial matches...');
+            for (const element of allElements) {
+                const text = element.textContent.trim().toLowerCase();
+                if (text.includes(categoryName.toLowerCase()) && text.length < categoryName.length + 20) {
+                    console.log('✅ Found partial match for category:', categoryName, '→', element.textContent.trim());
+                    
+                    // If it's a label for a radio button, click the radio button instead
+                    if (element.tagName === 'LABEL' && element.getAttribute('for')) {
+                        const radioId = element.getAttribute('for');
+                        const radio = document.getElementById(radioId);
+                        if (radio) {
+                            console.log('🔘 Clicking associated radio button for partial match');
+                            radio.click();
+                        } else {
+                            element.click();
+                        }
+                    } else {
+                        console.log('👆 Clicking element directly for partial match');
+                        element.click();
+                    }
+                    return true;
+                }
+            }
+            
+            console.log('❌ No match found for category:', categoryName);
+            return false;
+        }
+        
+        async function searchForCategory(targetCategory) {
+            console.log('🔍 DEBUG: Starting searchForCategory for:', targetCategory);
+            
+            // Wait a moment for the category dialog to load
+            await new Promise(resolve => setTimeout(resolve, 500)); // Reduced from 2000ms to 500ms
+            
+            // First, try to find clickable category elements directly
+            console.log('� DEBUG: Looking for clickable category elements...');
+            
+            const clickableElements = document.querySelectorAll('button, a, [role="button"], [role="option"], li, label');
+            let foundShorts = false;
+            
+            console.log(`🔍 DEBUG: Found ${clickableElements.length} clickable elements`);
+            
+            for (const element of clickableElements) {
+                const text = element.textContent.trim();
+                if (text.toLowerCase().includes('short') && text.length < 50) {
+                    console.log(`✅ DEBUG: Found shorts-related element: "${text}" (${element.tagName})`);
+                    
+                    // Try clicking it
+                    try {
+                        element.click();
+                        console.log(`👆 DEBUG: Clicked element: "${text}"`);
+                        foundShorts = true;
+                        await new Promise(resolve => setTimeout(resolve, 400)); // Reduced from 1000ms to 400ms
+                        return await confirmCategorySelection();
+                    } catch (error) {
+                        console.log(`❌ DEBUG: Failed to click element: ${error.message}`);
+                    }
+                }
+            }
+            
+            if (!foundShorts) {
+                console.log('❌ DEBUG: No shorts-related elements found');
+                
+                // Let's try to find the category selection dialog specifically
+                console.log('🔍 DEBUG: Looking for category selection dialog...');
+                const categorySelectors = [
+                    '.category-picker-dialog',
+                    '.category-selection-dialog',
+                    '[data-testid*="category"]',
+                    '.modal-dialog',
+                    '.dropdown-menu',
+                    '.category-dropdown',
+                    'div[role="dialog"]',
+                    'div[role="listbox"]'
+                ];
+                
+                let categoryContainer = null;
+                for (const selector of categorySelectors) {
+                    categoryContainer = document.querySelector(selector);
+                    if (categoryContainer && categoryContainer.offsetHeight > 0) {
+                        console.log(`🔍 DEBUG: Found category container with selector: ${selector}`);
+                        break;
+                    }
+                }
+                
+                if (categoryContainer) {
+                    console.log('🔍 DEBUG: Searching within category container...');
+                    const containerElements = categoryContainer.querySelectorAll('button, a, [role="button"], [role="option"], li, label, span, div');
+                    console.log(`🔍 DEBUG: Found ${containerElements.length} elements in category container`);
+                    
+                    // First, check if we're in a subcategory and need to navigate up
+                    const currentPath = Array.from(containerElements).find(el => 
+                        el.textContent.includes('Selected') && el.textContent.includes('>')
+                    );
+                    
+                    if (currentPath) {
+                        console.log(`🔍 DEBUG: Current category path: ${currentPath.textContent}`);
+                        
+                        // If we're in Jeans, we need to go up to Men's Clothing
+                        if (currentPath.textContent.includes('Jeans')) {
+                            console.log('🔍 DEBUG: Currently in Jeans category, need to navigate to parent');
+                            
+                            // Look for "Men's Clothing" button to go back
+                            const mensClothingButton = Array.from(containerElements).find(el => 
+                                el.textContent.toLowerCase().includes("men's clothing") ||
+                                el.textContent.toLowerCase().includes("mens clothing")
+                            );
+                            
+                            if (mensClothingButton) {
+                                console.log('🔍 DEBUG: Found Men\'s Clothing button, clicking to navigate up');
+                                mensClothingButton.click();
+                                
+                                // Wait for navigation and search again
+                                await new Promise(resolve => setTimeout(resolve, 1500));
+                                
+                                // Now search for Shorts in the new view
+                                const updatedElements = categoryContainer.querySelectorAll('button, a, [role="button"], [role="option"], li, label, span, div');
+                                console.log(`🔍 DEBUG: After navigation, found ${updatedElements.length} elements`);
+                                
+                                for (const element of updatedElements) {
+                                    const text = element.textContent.trim().toLowerCase();
+                                    if (text === 'shorts' || text.includes('short') && text.length < 30) {
+                                        console.log(`✅ DEBUG: Found shorts element: "${element.textContent.trim()}"`);
+                                        try {
+                                            element.click();
+                                            console.log('👆 DEBUG: Clicked shorts element');
+                                            foundShorts = true;
+                                            await new Promise(resolve => setTimeout(resolve, 1000));
+                                            return await confirmCategorySelection();
+                                        } catch (error) {
+                                            console.log(`❌ DEBUG: Failed to click shorts: ${error.message}`);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // If we didn't find shorts through navigation, show what's available
+                    if (!foundShorts) {
+                        console.log('🔍 DEBUG: Showing available elements in category dialog:');
+                        for (let i = 0; i < Math.min(20, containerElements.length); i++) {
+                            const element = containerElements[i];
+                            const text = element.textContent.trim();
+                            if (text.length > 0 && text.length < 100) {
+                                console.log(`   ${i + 1}. [${element.tagName}] "${text}"`);
+                                if (text.toLowerCase().includes('short')) {
+                                    console.log(`   ^^ This contains 'short' - trying to click it`);
+                                    try {
+                                        element.click();
+                                        foundShorts = true;
+                                        await new Promise(resolve => setTimeout(resolve, 1000));
+                                        return await confirmCategorySelection();
+                                    } catch (error) {
+                                        console.log(`   ^^ Click failed: ${error.message}`);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    console.log('🔍 DEBUG: No category container found, showing first 15 clickable elements:');
+                    for (let i = 0; i < Math.min(15, clickableElements.length); i++) {
+                        const element = clickableElements[i];
+                        const text = element.textContent.trim();
+                        if (text.length > 0 && text.length < 100) {
+                            console.log(`   ${i + 1}. [${element.tagName}] "${text}"`);
+                        }
+                    }
+                }
+            }
+            
+            // NEW: Try the search box approach
+            return await searchCategoryByTyping(targetCategory);
+        }
+        
+        async function searchCategoryByTyping(targetCategory) {
+            console.log('🔍 DEBUG: Starting searchCategoryByTyping for:', targetCategory);
+            
+            // Get the full category info from data
+            const categoryInfo = window.currentListingData?.categoryInfo || {};
+            const targetPath = categoryInfo.fullPath || categoryInfo.pathArray?.join(' > ') || '';
+            
+            console.log('🔍 DEBUG: Target category:', targetCategory);
+            console.log('🔍 DEBUG: Target path:', targetPath);
+            console.log('🔍 DEBUG: Path array:', categoryInfo.pathArray);
+            
+            // Look for the search box in the category dialog
+            console.log('🔍 DEBUG: Looking for category search box...');
+            const searchBoxSelectors = [
+                '.se-search-box input',
+                '.se-search-box__field input',
+                'input[aria-label="Item category"]',
+                '.category-picker input[type="text"]',
+                '.textbox__control'
+            ];
+            
+            let searchBox = null;
+            for (const selector of searchBoxSelectors) {
+                searchBox = document.querySelector(selector);
+                if (searchBox) {
+                    console.log(`✅ DEBUG: Found search box with selector: ${selector}`);
+                    break;
+                }
+            }
+            
+            if (!searchBox) {
+                console.log('❌ DEBUG: No search box found');
+                return false;
+            }
+            
+            // Clear and type the target category in the search box
+            console.log(`📝 DEBUG: Typing "${targetCategory}" in search box...`);
+            searchBox.focus();
+            searchBox.value = '';
+            
+            // Small delay to ensure search box is ready
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Use the exact category name from the .com listing (e.g., "Activewear Tops", "Polos")
+            const searchTerm = targetCategory;
+            
+            console.log(`🎯 DEBUG: Searching for exact category: "${searchTerm}"`);
+            
+            // Method 1: Type character by character with events
+            for (let i = 0; i < searchTerm.length; i++) {
+                searchBox.value += searchTerm[i];
+                searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+                searchBox.dispatchEvent(new Event('keyup', { bubbles: true }));
+                await new Promise(resolve => setTimeout(resolve, 30)); // Reduced from 50ms to 30ms
+            }
+            
+            // Method 2: Set full value and trigger multiple events
+            searchBox.value = searchTerm;
+            searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+            searchBox.dispatchEvent(new Event('change', { bubbles: true }));
+            searchBox.dispatchEvent(new Event('keyup', { bubbles: true }));
+            searchBox.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+            
+            console.log(`✅ DEBUG: Typed "${searchTerm}" in search box`);
+            
+            // Method 3: Try pressing Enter key
+            searchBox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+            searchBox.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', bubbles: true }));
+            searchBox.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+            
+            console.log('⚡ DEBUG: Triggered search with Enter key events');
+            
+            // Wait for search results to appear with multiple checks
+            console.log('⏳ DEBUG: Waiting for search results...');
+            
+            let searchResultsFound = false;
+            let attempts = 0;
+            const maxAttempts = 6; // Reduced from 8 to 6 attempts
+            
+            while (!searchResultsFound && attempts < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, 300)); // Reduced from 500ms to 300ms
+                attempts++;
+                
+                // Check for search results
+                const resultCheckSelectors = [
+                    '.category-picker__search-result',
+                    'input[name="categoryId"]',
+                    '.search-list__options-header',
+                    'fieldset input[type="radio"]'
+                ];
+                
+                for (const selector of resultCheckSelectors) {
+                    const results = document.querySelectorAll(selector);
+                    if (results.length > 0) {
+                        console.log(`✅ DEBUG: Search results found after ${attempts * 300}ms with selector: ${selector} (${results.length} results)`);
+                        searchResultsFound = true;
+                        break;
+                    }
+                }
+                
+                if (!searchResultsFound) {
+                    console.log(`⏳ DEBUG: Attempt ${attempts}/${maxAttempts} - still waiting for results...`);
+                }
+            }
+            
+            if (!searchResultsFound) {
+                console.log('❌ DEBUG: No search results appeared after typing');
+                return false;
+            }
+            
+            // Look for the best result matching both category name and path
+            const resultSelectors = [
+                'input[name="categoryId"]' // Any categoryId radio button
+            ];
+            
+            let targetResult = null;
+            let bestMatch = { score: 0, element: null, reason: '' };
+            
+            for (const selector of resultSelectors) {
+                const elements = document.querySelectorAll(selector);
+                console.log(`🔍 DEBUG: Found ${elements.length} category options to evaluate`);
+                
+                for (const element of elements) {
+                    const label = document.querySelector(`label[for="${element.id}"]`);
+                    const labelText = label ? label.textContent : 'Unknown';
+                    console.log(`✅ DEBUG: Evaluating option: ${labelText} (value: ${element.value})`);
+                    
+                    // Score this option based on category name and path matching
+                    const score = calculateCategoryMatchScore(labelText, targetCategory, targetPath, categoryInfo);
+                    console.log(`📊 DEBUG: Match score for "${labelText}": ${score.score} (${score.reason})`);
+                    
+                    if (score.score > bestMatch.score) {
+                        bestMatch = { score: score.score, element: element, reason: score.reason };
+                        console.log(`🎯 DEBUG: New best match: "${labelText}" with score ${score.score}`);
+                    }
+                }
+            }
+            
+            if (bestMatch.element) {
+                targetResult = bestMatch.element;
+                const label = document.querySelector(`label[for="${targetResult.id}"]`);
+                const labelText = label ? label.textContent : 'Unknown';
+                console.log(`🏆 DEBUG: Selected best match: "${labelText}" (Score: ${bestMatch.score}, Reason: ${bestMatch.reason})`);
+            } else {
+                console.log('❌ DEBUG: No suitable match found');
+                return false;
+            }
+            
+            // Click the radio button
+            console.log(`👆 DEBUG: Clicking search result: ${targetResult.value}`);
+            targetResult.checked = true; // Set as checked
+            targetResult.click(); // Also trigger click event
+            targetResult.dispatchEvent(new Event('change', { bubbles: true })); // Trigger change event
+            
+            // Wait a moment for selection to register
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // Verify selection
+            if (targetResult.checked) {
+                console.log('✅ DEBUG: Radio button is now checked');
+            } else {
+                console.log('⚠️ DEBUG: Radio button may not be properly selected');
+            }
+            
+            // Look for and click Done/Confirm button
+            console.log('🔍 DEBUG: Looking for Done button...');
+            const allButtons = document.querySelectorAll('button');
+            let doneButtonFound = false;
+            
+            for (const button of allButtons) {
+                const buttonText = button.textContent.toLowerCase().trim();
+                console.log(`🔍 DEBUG: Found button: "${buttonText}"`);
+                if (buttonText === 'done' || buttonText === 'confirm' || buttonText === 'select') {
+                    console.log('👆 DEBUG: Found and clicking Done button');
+                    button.click();
+                    doneButtonFound = true;
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    break;
+                }
+            }
+            
+            if (!doneButtonFound) {
+                console.log('⚠️ DEBUG: No Done button found, but selection was made');
+            }
+            
+            console.log('✅ DEBUG: Category search and selection process completed');
+            return true;
+            
+            // If no search found, try direct text matching
+            return await findAndClickCategoryByText(targetCategory);
+        }
+        
+        async function findAndClickCategoryByText(targetCategory) {
+            const allClickableElements = document.querySelectorAll(
+                'a, button, li, [role="option"], [role="button"], .clickable, .selectable'
+            );
+            
+            // First pass: exact matches
+            for (const element of allClickableElements) {
+                const text = element.textContent.trim();
+                if (text === targetCategory) {
+                    console.log('✅ Found exact text match for category:', targetCategory);
+                    element.click();
+                    return await confirmCategorySelection();
+                }
+            }
+            
+            // Second pass: partial matches
+            for (const element of allClickableElements) {
+                const text = element.textContent.trim().toLowerCase();
+                if (text.includes(targetCategory.toLowerCase()) && text.length < targetCategory.length + 30) {
+                    console.log('✅ Found partial text match for category:', targetCategory, '→', element.textContent.trim());
+                    element.click();
+                    return await confirmCategorySelection();
+                }
+            }
+            
+            return false;
+        }
+        
+        async function confirmCategorySelection() {
+            // Look for confirmation buttons like "Done", "Select", "Confirm", etc.
+            const allButtons = document.querySelectorAll('button, [role="button"]');
+            
+            for (const button of allButtons) {
+                const text = button.textContent.trim().toLowerCase();
+                const ariaLabel = (button.getAttribute('aria-label') || '').toLowerCase();
+                
+                if ((text.includes('done') || text.includes('select') || text.includes('confirm') || 
+                     text.includes('ok') || text.includes('save') ||
+                     ariaLabel.includes('done') || ariaLabel.includes('select') || ariaLabel.includes('confirm')) &&
+                    button.offsetParent !== null) { // Check if visible
+                    
+                    console.log('✅ Confirming category selection with button:', button.textContent.trim());
+                    button.click();
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    return true;
+                }
+            }
+            
+            // Alternative: close any open modals/dialogs by clicking outside
+            const modals = document.querySelectorAll('.modal, .dialog, .popup, .overlay');
+            if (modals.length > 0) {
+                console.log('🔄 Closing category selection modal');
+                document.body.click();
+                await new Promise(resolve => setTimeout(resolve, 500));
+                return true;
+            }
+            
+            return true; // Assume success if no explicit confirmation needed
+        }
+        
+        async function fallbackCategorySelection(targetCategory) {
+            // This is the original category selection logic as a fallback
+            console.log('🔄 Using fallback category selection method');
             
             // Try multiple methods to find and set the category
             
             // Method 1: Look for primary store category button first
             const storeCategoryButton = document.querySelector('button[name="primaryStoreCategoryId"], button[name="storeCategoryId"]');
-            if (storeCategoryButton && categoryToMatch) {
+            if (storeCategoryButton && targetCategory) {
                 storeCategoryButton.click();
                 await new Promise(resolve => setTimeout(resolve, 800));
                 
@@ -310,10 +1291,10 @@ async function fillFields(data) {
                     if (label) {
                         const labelText = label.textContent.trim();
                         // Check if this label matches our category
-                        if (labelText.toLowerCase().includes(categoryToMatch.toLowerCase()) ||
-                            categoryToMatch.toLowerCase().includes(labelText.toLowerCase()) ||
-                            (labelText.includes('Clothing') && categoryToMatch.toLowerCase().includes('clothing')) ||
-                            (labelText.includes('Jeans') && categoryToMatch.toLowerCase().includes('jeans'))) {
+                        if (labelText.toLowerCase().includes(targetCategory.toLowerCase()) ||
+                            targetCategory.toLowerCase().includes(labelText.toLowerCase()) ||
+                            (labelText.includes('Clothing') && targetCategory.toLowerCase().includes('clothing')) ||
+                            (labelText.includes('Jeans') && targetCategory.toLowerCase().includes('jeans'))) {
                             
                             // Select the radio button first
                             radio.click();
@@ -327,7 +1308,7 @@ async function fillFields(data) {
                                 categorySelected = true;
                                 
                                 // Wait for API call to complete
-                                await new Promise(resolve => setTimeout(resolve, 1000));
+                                await new Promise(resolve => setTimeout(resolve, 500)); // Reduced from 1000ms to 500ms
                                 
                                 // Handle the second popup that might appear
                                 const secondDoneButton = document.querySelector('button[_track="0.CATEGORY.1.Done"]');
@@ -362,7 +1343,7 @@ async function fillFields(data) {
             
             // Method 2: Look for main category button/dropdown
             const categoryButton = document.querySelector('button[name="categoryId"], button[aria-label*="category"], button[aria-label*="Category"]');
-            if (categoryButton && categoryToMatch && !storeCategoryButton) {
+            if (categoryButton && targetCategory && !storeCategoryButton) {
                 categoryButton.click();
                 await new Promise(resolve => setTimeout(resolve, 800));
                 
@@ -370,66 +1351,30 @@ async function fillFields(data) {
                 const categorySearch = document.querySelector('input[placeholder*="category"], input[placeholder*="Category"], input[aria-label*="category"]');
                 if (categorySearch) {
                     categorySearch.focus();
-                    categorySearch.value = categoryToMatch;
+                    categorySearch.value = targetCategory;
                     categorySearch.dispatchEvent(new Event('input', { bubbles: true }));
                     await new Promise(resolve => setTimeout(resolve, 500));
                     
                     // Look for matching category in dropdown and click it (this will close popup)
                     const categoryOptions = document.querySelectorAll('[role="option"], .category-option, [data-testid*="category-option"]');
                     const matchingCategory = Array.from(categoryOptions).find(option => 
-                        option.textContent.toLowerCase().includes(categoryToMatch.toLowerCase())
+                        option.textContent.toLowerCase().includes(targetCategory.toLowerCase())
                     );
                     
                     if (matchingCategory) {
                         matchingCategory.click();
-                        console.log('✅ Selected and closed main category popup:', categoryToMatch);
+                        console.log('✅ Selected and closed main category popup:', targetCategory);
                         await new Promise(resolve => setTimeout(resolve, 500));
                     } else {
                         // Try Enter key to select first match
                         categorySearch.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-                        console.log('🔧 Attempted to select main category with Enter:', categoryToMatch);
+                        console.log('🔧 Attempted to select main category with Enter:', targetCategory);
                         await new Promise(resolve => setTimeout(resolve, 500));
                     }
                 } else {
                     // No search input found, just close the popup
                     document.body.click();
                     await new Promise(resolve => setTimeout(resolve, 300));
-                }
-            }
-            
-            // Method 3: Look for category selectors and input fields
-            if (!categoryButton && !storeCategoryButton) {
-                const categorySelectors = [
-                    'select[name*="category"]',
-                    'input[name*="category"]',
-                    '[data-testid*="category-selector"]',
-                    '.category-selector'
-                ];
-                
-                for (const selector of categorySelectors) {
-                    const element = document.querySelector(selector);
-                    if (element && categoryToMatch) {
-                        if (element.tagName === 'SELECT') {
-                            // Handle select dropdown
-                            const options = Array.from(element.options);
-                            const matchingOption = options.find(option => 
-                                option.text.toLowerCase().includes(categoryToMatch.toLowerCase())
-                            );
-                            if (matchingOption) {
-                                element.value = matchingOption.value;
-                                element.dispatchEvent(new Event('change', { bubbles: true }));
-                                console.log('✅ Selected category from dropdown:', categoryToMatch);
-                            }
-                        } else if (element.tagName === 'INPUT') {
-                            // Handle input field
-                            element.focus();
-                            element.value = categoryToMatch;
-                            element.dispatchEvent(new Event('input', { bubbles: true }));
-                            element.dispatchEvent(new Event('change', { bubbles: true }));
-                            console.log('✅ Set category in input field:', categoryToMatch);
-                        }
-                        break;
-                    }
                 }
             }
             

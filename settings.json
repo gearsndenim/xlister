@@ -7,32 +7,14 @@
   
   "templates": {
     "ebayCA": {
-      "defaultTemplate": "https://www.ebay.ca/lstng?mode=AddItem",
-      "categories": {
-        "jeans": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650616013",
-        "hoodies": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650766013",
-        "hoodies_womens": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650772013",
-        "jackets": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650767013",
-        "jackets_womens": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650769013",
-        "jeans_womens": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650761013",
-        "pants": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650770013",
-        "pants_womens": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650771013",
-        "shirt_activewear": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHIRT_ACTIVEWEAR_CA",
-        "shirt_button": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHIRT_BUTTON_CA",
-        "shirt_polo": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHIRT_POLO_CA",
-        "shirt_tee": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHIRT_TEE_CA",
-        "shorts_activewear": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHORTS_ACTIVEWEAR_CA",
-        "shorts_swim": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHORTS_SWIM_CA",
-        "shorts": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHORTS_CA",
-        "sweaters": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SWEATERS_CA",
-        "sweatpants": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SWEATPANTS_CA"
-      }
+      "defaultTemplate": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650616013",
+      "defaultTemplateId": "6650616013",
+      "note": "The extension uses this default template and then navigates to the correct category based on the source listing."
     }
   },
   
   "defaults": {
     "adRate": "6.0",
-    "templateType": "jeans",
     "defaultConditionText": "washed using hypoallergenic laundry detergent that is free of dyes and perfumes."
   },
   
@@ -61,13 +43,18 @@
   },
   
   "_metadata": {
-    "version": "2.0",
-    "lastModified": "2025-08-22",
+    "version": "2.1",
+    "lastModified": "2025-08-23",
     "description": "Configuration file for eBay US → CA Bridge extension",
+    "changelog": [
+      "v2.1 - Enhanced category extraction with intelligent filtering to avoid non-category data (handling times, return policies, etc.)",
+      "v2.0 - Added dynamic category navigation instead of fixed templates"
+    ],
     "instructions": [
-      "1. Update templateId values with your actual eBay.ca template IDs",
-      "2. Adjust currency rate as needed (or integrate live API)",
-      "3. Customize UI messages and defaults as preferred"
+      "1. The extension now uses dynamic category navigation - no need to update template IDs",
+      "2. Category extraction automatically filters out non-category data like handling times",
+      "3. Adjust currency rate as needed (or integrate live API)",
+      "4. Customize UI messages and defaults as preferred"
     ]
   }
 }

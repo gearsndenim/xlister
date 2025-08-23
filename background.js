@@ -244,92 +244,428 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             // Extract images
             data.images = extractImages();
 
-            // Extract category information
-            // Try multiple methods to find the category
+            // Enhanced category extraction - get both category text and eBay category path
+            data.categoryInfo = extractCategoryInfo();
             
-            // Method 1: Look for primary store category
-            const storeCategoryButton = document.querySelector('button[name="primaryStoreCategoryId"]');
-            if (storeCategoryButton) {
-              const categoryText = storeCategoryButton.textContent.trim();
-              // Clean up the category text - remove "Store category", "First category", etc.
-              const cleanCategory = categoryText
-                .replace(/Store category/gi, '')
-                .replace(/First category/gi, '')
-                .replace(/Second category/gi, '')
-                .replace(/–/g, '-')
-                .trim();
-              if (cleanCategory && cleanCategory !== 'Edit' && cleanCategory !== 'Select') {
-                data.category = cleanCategory;
+            function extractCategoryInfo() {
+              const categoryInfo = {};
+              
+              console.log('🔍 DEBUG: Starting category extraction process...');
+              console.log('🔍 DEBUG: Page URL:', window.location.href);
+              console.log('🔍 DEBUG: Page title:', document.title);
+              
+              // Helper function to determine if text represents an actual product category (not store category)
+              function isActualProductCategory(text) {
+                if (!text || text.length < 3) return false;
+                
+                // Store categories are valid but should be treated separately
+                const storeCategoryPatterns = [
+                  /^0[-–]\d+\s*days?$/i,      // "0-30 days", "0–30 days"
+                  /^\d+[-–]\d+\s*days?$/i,   // "31-60 days", "91–120 days"
+                  /^\d+\+?\s*days?$/i        // "181+ days"
+                ];
+                
+                // Check if this is a store category (which is valid but different from product category)
+                for (const pattern of storeCategoryPatterns) {
+                  if (pattern.test(text.trim())) {
+                    return false; // It's a store category, not a product category
+                  }
+                }
+                
+                // Filter out other non-product-category data
+                const nonProductCategoryPatterns = [
+                  /^(immediate|same day|next day|business day)$/i,
+                  /^(no returns?|returns? accepted)$/i,
+                  /^(free|paid|calculated)$/i,
+                  /^(good|very good|excellent|new|used|pre-owned)$/i,
+                  /^(auction|buy it now|fixed price)$/i,
+                  /^(fast|standard|expedited|economy|overnight)$/i,
+                  /^(paypal|credit card|cash|check)$/i,
+                  /^\$\d+/i, // Prices starting with $
+                  /^\d+\.\d+$/i, // Decimal numbers
+                  /^(yes|no|n\/a|tbd|pending)$/i,
+                  /^(select|choose|edit|done|cancel|save)$/i,
+                  /^(none|other|misc|miscellaneous)$/i
+                ];
+                
+                // Check against non-product-category patterns
+                for (const pattern of nonProductCategoryPatterns) {
+                  if (pattern.test(text.trim())) {
+                    return false;
+                  }
+                }
+                
+                // Additional checks for common non-product-category content
+                const textLower = text.toLowerCase().trim();
+                const invalidTerms = [
+                  'return policy', 'shipping', 'payment',
+                  'condition', 'format', 'duration', 'location', 'quantity'
+                ];
+                
+                for (const term of invalidTerms) {
+                  if (textLower.includes(term)) {
+                    return false;
+                  }
+                }
+                
+                // If it passes all filters, it's likely a real product category
+                return true;
               }
-            }
-            
-            // Method 2: Look for main category selector
-            if (!data.category) {
-              const categoryButton = document.querySelector('button[name="categoryId"], button[aria-label*="Category"], button[aria-label*="category"]');
+              
+              // Helper function to determine if text is a valid store category
+              function isStoreCategory(text) {
+                if (!text) return false;
+                
+                const storeCategoryPatterns = [
+                  /^0[-–]30\s*days?$/i,
+                  /^31[-–]60\s*days?$/i,
+                  /^61[-–]90\s*days?$/i,
+                  /^91[-–]120\s*days?$/i,
+                  /^121[-–]180\s*days?$/i,
+                  /^181\+?\s*days?$/i
+                ];
+                
+                return storeCategoryPatterns.some(pattern => pattern.test(text.trim()));
+              }
+              
+              // Method 1: Extract from category breadcrumb path (only if no main category found)
+              if (!categoryInfo.category) {
+                const categoryPath = extractCategoryPath();
+                if (categoryPath) {
+                  // Filter the category path to remove non-product-categories (but keep eBay categories)
+                  const validPath = categoryPath.filter(item => isActualProductCategory(item));
+                  if (validPath.length > 0) {
+                    categoryInfo.path = validPath;
+                    categoryInfo.category = validPath[validPath.length - 1]; // Last element is most specific
+                  }
+                }
+              }
+              
+              // Method 2: Look for primary store category (only if no main category found)
+              if (!categoryInfo.category) {
+                const storeCategoryButton = document.querySelector('button[name="primaryStoreCategoryId"]');
+                if (storeCategoryButton) {
+                  const categoryText = storeCategoryButton.textContent.trim();
+                  const cleanCategory = categoryText
+                    .replace(/Store category/gi, '')
+                    .replace(/First category/gi, '')
+                    .replace(/Second category/gi, '')
+                    .replace(/–/g, '-')
+                    .trim();
+                  
+                  // Check if this is a store category (time-based) or a product category
+                  if (isStoreCategory(cleanCategory)) {
+                    categoryInfo.storeCategory = cleanCategory;
+                    console.log('🏪 Found store category:', cleanCategory);
+                  } else if (isActualProductCategory(cleanCategory)) {
+                    categoryInfo.storeProductCategory = cleanCategory;
+                    categoryInfo.category = cleanCategory;
+                    console.log('📦 Found product category in store section:', cleanCategory);
+                  } else if (cleanCategory && cleanCategory !== 'Edit' && cleanCategory !== 'Select') {
+                    console.log('❓ Found unrecognized category type:', cleanCategory);
+                  }
+                }
+              }
+              
+              // Method 3: Look for main category selector (HIGHEST PRIORITY)
+              // Look for the specific category button structure
+              let categoryButton = document.querySelector('button[name="categoryId"]');
+              
+              // Also try alternative selectors for the category button
+              if (!categoryButton) {
+                categoryButton = document.querySelector('button[aria-label*="Item category"]');
+              }
+              if (!categoryButton) {
+                categoryButton = document.querySelector('button[_track*="primaryCategory"]');
+              }
+              if (!categoryButton) {
+                categoryButton = document.querySelector('.summary__section-column button[name="categoryId"]');
+              }
+              if (!categoryButton) {
+                categoryButton = document.querySelector('button.value.fake-link[name="categoryId"]');
+              }
+              
+              console.log('🔍 DEBUG: Category button search results:');
+              console.log('   - button[name="categoryId"]:', !!document.querySelector('button[name="categoryId"]'));
+              console.log('   - button[aria-label*="Item category"]:', !!document.querySelector('button[aria-label*="Item category"]'));
+              console.log('   - button[_track*="primaryCategory"]:', !!document.querySelector('button[_track*="primaryCategory"]'));
+              
               if (categoryButton) {
                 const categoryText = categoryButton.textContent.trim();
-                if (categoryText && !categoryText.includes('Select') && !categoryText.includes('Choose') && !categoryText.includes('Edit')) {
-                  data.category = categoryText;
+                console.log('🔍 DEBUG: Found category button with text:', categoryText);
+                console.log('🔍 DEBUG: Button HTML:', categoryButton.outerHTML.substring(0, 200));
+                
+                // Also capture the category path from the same section
+                const categorySection = categoryButton.closest('.summary__section-column') || categoryButton.parentElement;
+                let categoryPath = '';
+                if (categorySection) {
+                  const pathElement = categorySection.querySelector('.value-secondary, [class*="secondary"]');
+                  if (pathElement) {
+                    categoryPath = pathElement.textContent.trim();
+                    // Clean up the path text (remove "in " prefix)
+                    categoryPath = categoryPath.replace(/^in\s+/i, '');
+                    console.log('🔍 DEBUG: Found category path:', categoryPath);
+                  }
                 }
-              }
-            }
-            
-            // Method 3: Look for category breadcrumb
-            if (!data.category) {
-              const categoryBreadcrumb = document.querySelector('.category-breadcrumb, .breadcrumb-category, [data-testid="category-breadcrumb"]');
-              if (categoryBreadcrumb) {
-                data.category = categoryBreadcrumb.textContent.trim();
-              }
-            }
-            
-            // Method 4: Look for breadcrumb navigation (get the most specific category)
-            if (!data.category) {
-              const breadcrumbs = document.querySelectorAll('nav[aria-label*="breadcrumb"] a, .breadcrumb a, [data-testid="breadcrumb"] a');
-              if (breadcrumbs.length > 1) {
-                // Take the second-to-last breadcrumb (last is usually the current item)
-                const categoryBreadcrumb = breadcrumbs[breadcrumbs.length - 2];
-                if (categoryBreadcrumb && categoryBreadcrumb.textContent.trim()) {
-                  data.category = categoryBreadcrumb.textContent.trim();
+                
+                const isValidProductCategory = isActualProductCategory(categoryText);
+                if (categoryText && !categoryText.includes('Select') && !categoryText.includes('Choose') && 
+                    !categoryText.includes('Edit') && isValidProductCategory) {
+                  categoryInfo.category = categoryText;
+                  if (categoryPath) {
+                    categoryInfo.fullPath = categoryPath;
+                    categoryInfo.pathArray = categoryPath.split(' > ').map(item => item.trim());
+                  }
+                  console.log('📦 Found main eBay category:', categoryText);
+                  console.log('📍 Found category path:', categoryPath);
+                } else if (categoryText && !isValidProductCategory) {
+                  console.log('❓ Found non-product category in main selector:', categoryText);
+                } else {
+                  console.log('❓ Category button text not suitable:', categoryText);
                 }
+              } else {
+                console.log('❌ No category button found with any selector');
+                
+                // Debug: show all buttons to help find the right selector
+                const allButtons = document.querySelectorAll('button');
+                console.log('🔍 DEBUG: All buttons on page:');
+                allButtons.forEach((btn, index) => {
+                  if (index < 10) { // Only show first 10 to avoid spam
+                    const text = btn.textContent.trim().substring(0, 50);
+                    const name = btn.getAttribute('name') || 'no-name';
+                    const ariaLabel = btn.getAttribute('aria-label') || 'no-aria-label';
+                    console.log(`   ${index + 1}. name="${name}" aria-label="${ariaLabel}" text="${text}"`);
+                  }
+                });
               }
-            }
-            
-            // Method 5: Look for category in URL or page data
-            if (!data.category) {
-              // Check URL for category ID
+              
+              // Method 4: Extract category ID from URL
               const urlMatch = window.location.href.match(/categoryId=(\d+)/);
               if (urlMatch) {
-                data.categoryId = urlMatch[1];
+                categoryInfo.categoryId = urlMatch[1];
               }
-            }
-            
-            // Method 6: Look for any element with category information (last resort)
-            if (!data.category) {
-              const categoryElements = document.querySelectorAll('[class*="category"]:not([class*="store"]), [data-testid*="category"], [aria-label*="category"]:not([aria-label*="store"])');
-              for (const element of categoryElements) {
-                const text = element.textContent.trim();
-                if (text && text.length > 3 && text.length < 100 && 
-                    !text.includes('Select') && !text.includes('Choose') && 
-                    !text.includes('Edit') && !text.includes('Store category')) {
-                  data.category = text;
-                  break;
+              
+              // Method 5: Look for eBay's internal category data (only if no main category found)
+              if (!categoryInfo.category) {
+                const categoryData = extractEbayCategoryData();
+                if (categoryData) {
+                  // Validate category data before using it
+                  if (categoryData.categoryName && isActualProductCategory(categoryData.categoryName)) {
+                    categoryInfo.categoryName = categoryData.categoryName;
+                    categoryInfo.category = categoryData.categoryName;
+                    console.log('📦 Found product category in internal data:', categoryData.categoryName);
+                  } else if (categoryData.categoryName) {
+                    console.log('❓ Found non-product category in internal data:', categoryData.categoryName);
+                  }
+                  
+                  if (categoryData.categoryId) {
+                    categoryInfo.categoryId = categoryData.categoryId;
+                  }
+                  
+                  if (categoryData.breadcrumbs) {
+                    const validBreadcrumbs = categoryData.breadcrumbs.filter(item => 
+                      typeof item === 'string' && isActualProductCategory(item)
+                    );
+                    if (validBreadcrumbs.length > 0) {
+                      categoryInfo.breadcrumbs = validBreadcrumbs;
+                      if (!categoryInfo.category) categoryInfo.category = validBreadcrumbs[validBreadcrumbs.length - 1];
+                    }
+                  }
                 }
               }
+              
+              // Method 6: Fallback - infer category from title or item details if no valid category found
+              if (!categoryInfo.category) {
+                console.log('⚠️ No category found through extraction methods, attempting inference from title');
+                const inferredCategory = inferCategoryFromTitle();
+                if (inferredCategory) {
+                  categoryInfo.category = inferredCategory;
+                  categoryInfo.inferred = true;
+                  console.log('🔍 Inferred category from title:', inferredCategory);
+                } else {
+                  console.log('❌ Could not infer category from title either');
+                }
+              } else {
+                console.log('✅ Category found through extraction, skipping inference');
+              }
+              
+              // Clean up category text if found
+              if (categoryInfo.category) {
+                categoryInfo.category = categoryInfo.category
+                  .replace(/\s*\(.*?\)/g, '') // Remove parenthetical content
+                  .replace(/Edit$|Select$|Choose$/g, '') // Remove trailing UI text
+                  .trim();
+                
+                // If category is too generic or empty after cleaning, remove it
+                if (!categoryInfo.category || categoryInfo.category.length < 3 || 
+                    ['Edit', 'Select', 'Choose', 'Category'].includes(categoryInfo.category)) {
+                  delete categoryInfo.category;
+                }
+              }
+              
+              return categoryInfo;
             }
             
-            // Clean up category if found
-            if (data.category) {
-              // Remove common UI text that might have been captured
-              data.category = data.category
-                .replace(/\s*\(.*?\)/g, '') // Remove parenthetical content
-                .replace(/Edit$|Select$|Choose$/g, '') // Remove trailing UI text
-                .trim();
+            function extractCategoryPath() {
+              // Look for category breadcrumb navigation
+              const breadcrumbSelectors = [
+                'nav[aria-label*="breadcrumb"] a',
+                '.breadcrumb a',
+                '[data-testid="breadcrumb"] a',
+                '.category-breadcrumb a',
+                '.bread-crumb a',
+                'ol.breadcrumb a',
+                '.category-path a',
+                '.nav-breadcrumb a'
+              ];
               
-              // If category is too generic or empty after cleaning, remove it
-              if (!data.category || data.category.length < 3 || 
-                  ['Edit', 'Select', 'Choose', 'Category'].includes(data.category)) {
-                delete data.category;
+              for (const selector of breadcrumbSelectors) {
+                const breadcrumbs = document.querySelectorAll(selector);
+                if (breadcrumbs.length > 1) {
+                  const path = Array.from(breadcrumbs)
+                    .map(link => link.textContent.trim())
+                    .filter(text => {
+                      if (!text) return false;
+                      // Filter out common non-category breadcrumb items
+                      const nonCategoryItems = [
+                        'eBay', 'Home', 'All Categories', 'My eBay', 'Sell', 'Selling',
+                        'List an item', 'Create listing', 'Edit listing', 'Revise',
+                        'Back to listing', 'Previous page'
+                      ];
+                      return !nonCategoryItems.some(item => text.toLowerCase().includes(item.toLowerCase()));
+                    })
+                    .slice(0, -1); // Remove the last item (usually the current listing title)
+                  
+                  if (path.length > 0) {
+                    console.log('📍 Found category path:', path);
+                    return path;
+                  }
+                }
               }
+              
+              // Alternative: Look for eBay's category navigation structure
+              const categoryNavElements = document.querySelectorAll('.category-nav a, .cat-nav a, [data-testid="category-nav"] a');
+              if (categoryNavElements.length > 0) {
+                const navPath = Array.from(categoryNavElements)
+                  .map(link => link.textContent.trim())
+                  .filter(text => text && text !== 'eBay' && text !== 'Home');
+                
+                if (navPath.length > 0) {
+                  console.log('📍 Found category nav path:', navPath);
+                  return navPath;
+                }
+              }
+              
+              // Alternative: Look for category path in page title or meta
+              const pageTitle = document.title;
+              if (pageTitle.includes(' in ')) {
+                const titleParts = pageTitle.split(' in ');
+                if (titleParts.length > 1) {
+                  const categoryPart = titleParts[1].split(' |')[0].trim();
+                  if (categoryPart && !categoryPart.includes('eBay')) {
+                    console.log('📍 Found category from page title:', [categoryPart]);
+                    return [categoryPart];
+                  }
+                }
+              }
+              
+              console.log('⚠️ No category path found');
+              return null;
+            }
+            
+            function extractEbayCategoryData() {
+              // Look for eBay's internal category data in page scripts or data attributes
+              const categoryData = {};
+              
+              // Check for category data in script tags
+              const scripts = document.querySelectorAll('script');
+              for (const script of scripts) {
+                const content = script.textContent;
+                
+                // Look for category ID patterns
+                const categoryIdMatch = content.match(/"categoryId":\s*"?(\d+)"?/);
+                if (categoryIdMatch) {
+                  categoryData.categoryId = categoryIdMatch[1];
+                }
+                
+                // Look for category name patterns
+                const categoryNameMatch = content.match(/"categoryName":\s*"([^"]+)"/);
+                if (categoryNameMatch) {
+                  categoryData.categoryName = categoryNameMatch[1];
+                }
+                
+                // Look for breadcrumb data
+                const breadcrumbMatch = content.match(/"breadcrumbs":\s*\[([^\]]+)\]/);
+                if (breadcrumbMatch) {
+                  try {
+                    const breadcrumbData = JSON.parse(`[${breadcrumbMatch[1]}]`);
+                    categoryData.breadcrumbs = breadcrumbData;
+                  } catch (e) {
+                    // Silent fail
+                  }
+                }
+              }
+              
+              return Object.keys(categoryData).length > 0 ? categoryData : null;
+            }
+            
+            function inferCategoryFromTitle() {
+              // Try to infer category from the item title
+              const titleInput = document.querySelector('input[name="title"]');
+              if (!titleInput || !titleInput.value) return null;
+              
+              const title = titleInput.value.toLowerCase();
+              
+              // Common clothing categories
+              const categoryMappings = {
+                'jeans': ['jean', 'denim'],
+                'shorts': ['short', 'cutoff', 'jort'],
+                'pants': ['pant', 'trouser', 'chino', 'slack'],
+                'hoodie': ['hoodie', 'hoody', 'sweatshirt'],
+                'jacket': ['jacket', 'blazer', 'coat', 'windbreaker'],
+                'shirt': ['shirt', 'tee', 'top', 'blouse', 'polo'],
+                'sweater': ['sweater', 'pullover', 'cardigan', 'jumper'],
+                'dress': ['dress', 'gown', 'frock'],
+                'skirt': ['skirt', 'mini', 'maxi'],
+                'shoes': ['shoe', 'sneaker', 'boot', 'sandal', 'heel'],
+                'hat': ['hat', 'cap', 'beanie', 'snapback'],
+                'bag': ['bag', 'purse', 'backpack', 'tote', 'clutch'],
+                'watch': ['watch', 'timepiece'],
+                'sunglasses': ['sunglass', 'glasses', 'shades']
+              };
+              
+              // Check for category keywords in title
+              for (const [category, keywords] of Object.entries(categoryMappings)) {
+                for (const keyword of keywords) {
+                  if (title.includes(keyword)) {
+                    // Try to determine if it's men's or women's
+                    const isWomens = title.includes('women') || title.includes('ladies') || 
+                                    title.includes('girl') || title.includes('female');
+                    const isMens = title.includes('men') || title.includes('guy') || 
+                                  title.includes('male') || title.includes('boy');
+                    
+                    let categoryName = category.charAt(0).toUpperCase() + category.slice(1);
+                    
+                    if (isWomens) {
+                      categoryName = `Women's ${categoryName}`;
+                    } else if (isMens) {
+                      categoryName = `Men's ${categoryName}`;
+                    }
+                    
+                    return categoryName;
+                  }
+                }
+              }
+              
+              return null;
+            }
+            
+            // Maintain backward compatibility
+            if (data.categoryInfo && data.categoryInfo.category) {
+              data.category = data.categoryInfo.category;
+            }
+            if (data.categoryInfo && data.categoryInfo.categoryId) {
+              data.categoryId = data.categoryInfo.categoryId;
             }
 
             // FULLY DYNAMIC ATTRIBUTE EXTRACTION
@@ -424,9 +760,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               data.condition = conditionSelect.value || conditionSelect.textContent.trim();
             }
 
-            // Try to determine template type from title or category
-            data.templateType = determineTemplateType(data.title, data);
-
             // Add metadata
             data.source = 'EBAY_US_CA_BRIDGE';
             data.originalUrl = window.location.href;
@@ -435,69 +768,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             return data;
           }
 
-          // Function to determine template type based on title and data
-          function determineTemplateType(title, data) {
-            if (!title) return 'jeans'; // default
-            
-            const titleLower = title.toLowerCase();
-            
-            // Check for specific clothing types in title
-            if (titleLower.includes('hoodie') || titleLower.includes('sweatshirt')) {
-              return 'hoodies';
-            }
-            if (titleLower.includes('jacket') || titleLower.includes('blazer') || titleLower.includes('coat')) {
-              if (titleLower.includes('women') || titleLower.includes('ladies')) {
-                return 'jackets_womens';
-              }
-              return 'jackets';
-            }
-            if (titleLower.includes('jean')) {
-              if (titleLower.includes('women') || titleLower.includes('ladies')) {
-                return 'jeans_womens';
-              }
-              return 'jeans';
-            }
-            if (titleLower.includes('pant') || titleLower.includes('trouser')) {
-              return 'pants';
-            }
-            if (titleLower.includes('short')) {
-              if (titleLower.includes('swim') || titleLower.includes('board')) {
-                return 'shorts_swim';
-              }
-              if (titleLower.includes('athletic') || titleLower.includes('gym') || titleLower.includes('sport')) {
-                return 'shorts_activewear';
-              }
-              return 'shorts';
-            }
-            if (titleLower.includes('polo')) {
-              return 'shirt_polo';
-            }
-            if (titleLower.includes('button') || titleLower.includes('dress shirt')) {
-              return 'shirt_button';
-            }
-            if (titleLower.includes('t-shirt') || titleLower.includes('tee') || titleLower.includes('tank')) {
-              return 'shirt_tee';
-            }
-            if (titleLower.includes('athletic') || titleLower.includes('dri-fit') || titleLower.includes('training')) {
-              return 'shirt_activewear';
-            }
-            if (titleLower.includes('sweater') || titleLower.includes('pullover') || titleLower.includes('cardigan')) {
-              return 'sweaters';
-            }
-            if (titleLower.includes('sweatpant') || titleLower.includes('jogger')) {
-              return 'sweatpants';
-            }
-            
-            // Default to jeans if unsure
-            return 'jeans';
-          }
-
           const extractedData = extractEbayListingFormData();
+          
+          // Log category extraction results
+          console.log('📋 Category extraction results:');
+          if (extractedData.categoryInfo) {
+            console.log('   📍 Category info:', extractedData.categoryInfo);
+            console.log('   📂 Category path:', extractedData.categoryInfo.path);
+            console.log('   🏷️ eBay product category:', extractedData.categoryInfo.category);
+            console.log('   🏪 Store category:', extractedData.categoryInfo.storeCategory);
+            console.log('   🔢 Category ID:', extractedData.categoryInfo.categoryId);
+            console.log('   🧠 Inferred from title:', extractedData.categoryInfo.inferred || false);
+          } else {
+            console.log('   ⚠️ No category information extracted');
+          }
           
           // Convert extracted eBay.com data to bridged JSON format - FULLY DYNAMIC
           const bridgedJson = {
             source: "EBAY_US_CA_BRIDGE",
-            templateType: extractedData.templateType || "jeans",
             adRate: "6.0"
           };
           
@@ -506,6 +794,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             bridgedJson[key] = extractedData[key];
           });
 
+          console.log('🌉 Final bridged JSON preview:');
+          console.log('   📋 Title:', bridgedJson.title);
+          console.log('   💰 Price USD/CAD:', bridgedJson.priceUSD, '/', bridgedJson.priceCAD);
+          console.log('   🏷️ Category info:', bridgedJson.categoryInfo);
+          console.log('   📸 Images:', bridgedJson.images?.length || 0, 'images');
+          
           // Save to storage for popup sync
           chrome.storage.local.set({ latestEbayJson: bridgedJson });
           
@@ -517,6 +811,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           
           // If triggered by keyboard shortcut, send message to background for auto-bridging
           if (isFromKeyboardShortcut) {
+            console.log('⌨️ Keyboard shortcut triggered - auto-bridging to eBay.ca');
             chrome.runtime.sendMessage({ 
               action: "autoBridgeToEbayCA", 
               payload: bridgedJson 
@@ -534,18 +829,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     console.log('📩 Received autoBridgeToEbayCA trigger');
     const bridgedJson = msg.payload;
     
-    // Load settings to get template URL
+    // Load settings to get the base eBay.ca URL
     fetch(chrome.runtime.getURL('settings.json'))
       .then(response => response.json())
       .then(settings => {
-        const templateType = bridgedJson.templateType || 'jeans';
-        const templateUrl = settings.templates.ebayCA.categories[templateType] || 
-                           settings.templates.ebayCA.defaultTemplate;
+        // Use the template ID from settings
+        const templateId = settings.templates?.ebayCA?.defaultTemplateId || '6650616013';
+        const defaultTemplateUrl = `https://www.ebay.ca/lstng?mode=AddItem&templateId=${templateId}`;
         
-        console.log('🎯 Using template for', templateType, ':', templateUrl);
+        console.log('🎯 Opening eBay.ca listing page with template for category navigation:', defaultTemplateUrl);
+        console.log('📋 Category info to be set:', bridgedJson.categoryInfo);
         
-        // Create new tab with eBay.ca template
-        chrome.tabs.create({ url: templateUrl }, (newTab) => {
+        // Create new tab with eBay.ca working template
+        chrome.tabs.create({ url: defaultTemplateUrl }, (newTab) => {
           // Wait for tab to load, then fill the form
           chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
             if (tabId === newTab.id && info.status === 'complete') {
@@ -556,7 +852,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 target: { tabId: newTab.id },
                 files: ['contentScript.js']
               }, () => {
-                // Send the listing data to fill the form
+                // Send the listing data to fill the form (including enhanced category info)
                 chrome.tabs.sendMessage(newTab.id, { 
                   action: 'fillForm', 
                   data: bridgedJson 
@@ -581,16 +877,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .then(response => response.json())
       .then(settings => {
         const listingData = msg.data;
-        const templateType = listingData.templateType || 'jeans';
         
-        // Get the appropriate eBay.ca template URL
-        const templateUrl = settings.templates.ebayCA.categories[templateType] || 
-                           settings.templates.ebayCA.defaultTemplate;
+        // Use the template ID from settings
+        const templateId = settings.templates?.ebayCA?.defaultTemplateId || '6650616013';
+        const defaultTemplateUrl = `https://www.ebay.ca/lstng?mode=AddItem&templateId=${templateId}`;
         
-        console.log('🎯 Using template for', templateType, ':', templateUrl);
+        console.log('🎯 Opening eBay.ca listing page with template for category navigation:', defaultTemplateUrl);
+        console.log('📋 Category info to be set:', listingData.categoryInfo);
         
-        // Create new tab with eBay.ca template
-        chrome.tabs.create({ url: templateUrl }, (newTab) => {
+        // Create new tab with eBay.ca working template
+        chrome.tabs.create({ url: defaultTemplateUrl }, (newTab) => {
           // Wait for tab to load, then fill the form
           chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
             if (tabId === newTab.id && info.status === 'complete') {
