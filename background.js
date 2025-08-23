@@ -90,90 +90,111 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           // Extract listing data from eBay.com listing form
           function extractEbayListingFormData() {
             const data = {};
-            console.log('🔧 Extracting from eBay listing form...');
 
-            // Extract title from form
+            // Extract basic form fields
             const titleInput = document.querySelector('input[name="title"]');
-            if (titleInput) {
-              data.title = titleInput.value.trim();
-              console.log('📝 Title found:', data.title);
-            } else {
-              console.log('❌ Title input not found');
-            }
+            if (titleInput) data.title = titleInput.value.trim();
 
-            // Extract price from form
             const priceInput = document.querySelector('input[name="price"]');
             if (priceInput && priceInput.value) {
               const usdPrice = priceInput.value.replace(/[^0-9.]/g, '');
               data.priceUSD = usdPrice;
               data.priceCAD = convertUsdToCad(usdPrice);
-              console.log('💰 Price found:', data.priceUSD, '→', data.priceCAD);
-            } else {
-              console.log('❌ Price input not found or empty');
             }
 
-            // Extract SKU/Custom Label
             const skuInput = document.querySelector('input[name="customLabel"]');
-            if (skuInput) {
-              data.sku = skuInput.value.trim();
-              console.log('🏷️ SKU found:', data.sku);
-            } else {
-              console.log('❌ SKU input not found');
-            }
+            if (skuInput) data.sku = skuInput.value.trim();
 
-            // Extract description
             const descTextarea = document.querySelector('textarea[name="description"]');
             if (descTextarea) data.description = descTextarea.value.trim();
 
-            // Extract condition description
             const conditionTextarea = document.querySelector('textarea[name="itemConditionDescription"]');
             if (conditionTextarea) data.conditionDescription = conditionTextarea.value.trim();
 
-            // Extract attributes from dropdown buttons
+            // FULLY DYNAMIC ATTRIBUTE EXTRACTION
             const attributeButtons = document.querySelectorAll('button[name^="attributes."]');
-            console.log('🔍 Found attribute buttons:', attributeButtons.length);
             
+            // Discover and extract ALL attribute fields dynamically
             attributeButtons.forEach(button => {
-              const attributeName = button.getAttribute('name').replace('attributes.', '').toLowerCase();
-              const selectedValue = button.textContent.trim();
+              const fullAttributeName = button.getAttribute('name').replace('attributes.', '');
+              const buttonText = button.textContent.trim();
               
-              console.log(`🏷️ Checking ${attributeName}: "${selectedValue}"`);
+              // Convert attribute name to camelCase property name
+              const propertyName = fullAttributeName
+                .toLowerCase()
+                .replace(/[^a-zA-Z0-9]/g, ' ')  // Replace special chars with spaces
+                .trim()
+                .split(' ')
+                .map((word, index) => index === 0 ? word : word.charAt(0).toUpperCase() + word.slice(1))
+                .join('');
               
-              // Skip if it's just a placeholder or empty
-              if (selectedValue && !selectedValue.includes('Select') && !selectedValue.includes('Choose') && !selectedValue.includes('--')) {
-                switch(attributeName) {
-                  case 'brand': data.brand = selectedValue; break;
-                  case 'size': data.size = selectedValue; break;
-                  case 'color': data.color = selectedValue; break;
-                  case 'style': data.style = selectedValue; break;
-                  case 'fit': data.fit = selectedValue; break;
-                  case 'rise': data.rise = selectedValue; break;
-                  case 'inseam': data.inseam = selectedValue; break;
-                  case 'waist size': data.waistSize = selectedValue; break;
-                  case 'fabric wash': data.wash = selectedValue; break;
-                  case 'closure': data.closure = selectedValue; break;
-                  case 'sleeve length': data.sleeveLength = selectedValue; break;
-                  case 'neckline': data.neckline = selectedValue; break;
-                  case 'collar style': data.collarStyle = selectedValue; break;
-                  case 'fabric type': data.fabricType = selectedValue; break;
-                  case 'type': data.type = selectedValue; break;
-                  case 'chest size': data.chestSize = selectedValue; break;
-                  case 'shirt length': data.shirtLength = selectedValue; break;
-                  case 'country/region of manufacture': data.country = selectedValue; break;
+              // Check if this is a multi-select field by looking for "(+X)" pattern or checking for selected items
+              const isMultiSelect = buttonText.includes('(+') || buttonText.includes(' (+');
+              
+              if (isMultiSelect) {
+                // For multi-select fields, we need to find the selected items in the dropdown
+                try {
+                  // Look for the dropdown menu associated with this button
+                  const buttonId = button.getAttribute('aria-controls');
+                  let menuContainer = null;
+                  
+                  if (buttonId) {
+                    menuContainer = document.getElementById(buttonId);
+                  }
+                  
+                  if (!menuContainer) {
+                    // Fallback: look for menu container near this button
+                    menuContainer = button.parentElement.querySelector('[data-testid="menu-container"]');
+                  }
+                  
+                  if (!menuContainer) {
+                    // Another fallback: look more broadly
+                    const buttonParent = button.closest('.se-field, .fake-menu-button');
+                    if (buttonParent) {
+                      menuContainer = buttonParent.querySelector('[data-testid="menu-container"]');
+                    }
+                  }
+                  
+                  if (menuContainer) {
+                    // Find all checked items in the selected options section
+                    const selectedItems = menuContainer.querySelectorAll('.filter-menu__item[aria-checked="true"], .filter-menu__item[checked]');
+                    
+                    const selectedValues = Array.from(selectedItems).map(item => {
+                      const textElement = item.querySelector('.filter-menu__text');
+                      return textElement ? textElement.textContent.trim() : '';
+                    }).filter(text => text);
+                    
+                    // Remove duplicates by converting to Set and back to Array
+                    const uniqueValues = [...new Set(selectedValues)];
+                    
+                    if (uniqueValues.length > 0) {
+                      data[propertyName] = uniqueValues;
+                    }
+                  } else {
+                    // Fallback: extract from button text
+                    const mainValue = buttonText.replace(/\s*\(\+\d+\).*/, '').trim();
+                    if (mainValue && !mainValue.includes('Select') && !mainValue.includes('Choose')) {
+                      data[propertyName] = [mainValue];
+                    }
+                  }
+                } catch (error) {
+                  // Fallback: extract main value from button text
+                  const mainValue = buttonText.replace(/\s*\(\+\d+\).*/, '').trim();
+                  if (mainValue && !mainValue.includes('Select') && !mainValue.includes('Choose')) {
+                    data[propertyName] = [mainValue];
+                  }
                 }
-                console.log(`✅ Set ${attributeName} = ${selectedValue}`);
+              } else {
+                // Single-select field - use button text
+                if (buttonText && 
+                    !buttonText.includes('Select') && 
+                    !buttonText.includes('Choose') && 
+                    !buttonText.includes('--') &&
+                    !buttonText.includes('Loading')) {
+                  data[propertyName] = buttonText;
+                }
               }
             });
-
-            // Extract materials (multi-select)
-            const materialButton = document.querySelector('button[name="attributes.Material"]');
-            if (materialButton) {
-              const materialText = materialButton.textContent.trim();
-              if (materialText && !materialText.includes('Select')) {
-                // Parse multiple materials if they're comma-separated
-                data.material = materialText.split(',').map(m => m.trim()).filter(m => m);
-              }
-            }
 
             // Extract condition
             const conditionSelect = document.querySelector('select[name="itemCondition"]') ||
@@ -251,47 +272,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           }
 
           const extractedData = extractEbayListingFormData();
-          console.log('📦 Extracted eBay.com listing form data:', extractedData);
           
-          // Convert extracted eBay.com data to bridged JSON format
+          // Convert extracted eBay.com data to bridged JSON format - FULLY DYNAMIC
           const bridgedJson = {
             source: "EBAY_US_CA_BRIDGE",
             templateType: extractedData.templateType || "jeans",
-            title: extractedData.title || "",
-            sku: extractedData.sku || "",
-            priceCAD: extractedData.priceCAD || "",
-            priceUSD: extractedData.priceUSD || "",
-            brand: extractedData.brand || "",
-            size: extractedData.size || "",
-            inseam: extractedData.inseam || "",
-            waistSize: extractedData.waistSize || "",
-            color: extractedData.color || "",
-            wash: extractedData.wash || "",
-            rise: extractedData.rise || "",
-            style: extractedData.style || "",
-            fit: extractedData.fit || "",
-            type: extractedData.type || "",
-            material: extractedData.material || [],
-            sleeveLength: extractedData.sleeveLength || "",
-            neckline: extractedData.neckline || "",
-            closure: extractedData.closure || "",
-            collarStyle: extractedData.collarStyle || "",
-            fabricType: extractedData.fabricType || "",
-            chestSize: extractedData.chestSize || "",
-            shirtLength: extractedData.shirtLength || "",
-            country: extractedData.country || "Unknown",
-            description: extractedData.description || "",
-            condition: extractedData.condition || "",
-            conditionDescription: extractedData.conditionDescription || "",
-            adRate: "6.0",
-            originalUrl: extractedData.originalUrl,
-            extractedAt: extractedData.extractedAt
+            adRate: "6.0"
           };
+          
+          // Dynamically copy ALL extracted fields to bridged JSON
+          Object.keys(extractedData).forEach(key => {
+            bridgedJson[key] = extractedData[key];
+          });
 
           // Save to storage for popup sync
-          chrome.storage.local.set({ latestEbayJson: bridgedJson }, () => {
-            console.log("✅ Bridged JSON saved to storage for popup sync");
-          });
+          chrome.storage.local.set({ latestEbayJson: bridgedJson });
           
           // Send back to popup with explicit UI update request
           chrome.runtime.sendMessage({ 
@@ -301,7 +296,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           
           // If triggered by keyboard shortcut, send message to background for auto-bridging
           if (isFromKeyboardShortcut) {
-            console.log('🚀 Keyboard shortcut detected - requesting auto-bridge...');
             chrome.runtime.sendMessage({ 
               action: "autoBridgeToEbayCA", 
               payload: bridgedJson 

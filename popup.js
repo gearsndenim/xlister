@@ -130,41 +130,20 @@ chrome.runtime.onMessage.addListener(async (msg) => {
     if (msg.action === "extractedEbayComData") {
         const extractedData = msg.payload;
         
-        // Convert extracted eBay.com data to our JSON format
+        // Start with core structure and metadata
         const bridgedJson = {
             source: "EBAY_US_CA_BRIDGE",
             templateType: extractedData.templateType || settings.defaults.templateType || "jeans",
-            title: extractedData.title || "",
-            sku: extractedData.sku || "",
-            priceCAD: extractedData.priceCAD || "",
-            priceUSD: extractedData.priceUSD || "",
-            brand: extractedData.brand || "",
-            size: extractedData.size || "",
-            inseam: extractedData.inseam || "",
-            waistSize: extractedData.waistSize || "",
-            color: extractedData.color || "",
-            wash: extractedData.wash || "",
-            rise: extractedData.rise || "",
-            style: extractedData.style || "",
-            fit: extractedData.fit || "",
-            type: extractedData.type || "",
-            material: extractedData.material || [],
-            sleeveLength: extractedData.sleeveLength || "",
-            neckline: extractedData.neckline || "",
-            closure: extractedData.closure || "",
-            collarStyle: extractedData.collarStyle || "",
-            fabricType: extractedData.fabricType || "",
-            chestSize: extractedData.chestSize || "",
-            shirtLength: extractedData.shirtLength || "",
-            country: extractedData.country || "Unknown",
-            description: extractedData.description || "",
-            condition: extractedData.condition || "",
-            conditionDescription: extractedData.conditionDescription || "",
-            adRate: settings.defaults.adRate || "6.0",
-            // Metadata
-            originalUrl: extractedData.originalUrl,
-            extractedAt: extractedData.extractedAt
+            adRate: settings.defaults.adRate || "6.0"
         };
+        
+        // Dynamically copy ALL extracted fields
+        Object.keys(extractedData).forEach(key => {
+            // Don't overwrite the core fields we already set
+            if (!bridgedJson.hasOwnProperty(key)) {
+                bridgedJson[key] = extractedData[key];
+            }
+        });
 
         chrome.storage.local.set({ latestEbayJson: bridgedJson }, () => {
             console.log("✅ Bridged JSON saved to storage");

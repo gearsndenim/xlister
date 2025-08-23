@@ -122,7 +122,6 @@ async function fillFields(data) {
         // Wait for key elements to be available
         try {
             await waitForSelector('input[name="title"]', 10000);
-            console.log('✅ Page elements are ready');
         } catch (error) {
             console.error('❌ Timeout waiting for page elements to load');
             removeLoadingOverlay();
@@ -162,25 +161,15 @@ async function fillFields(data) {
 
         // Handle description field (rich text editor)
         if (data.description) {
-            console.log('📝 Setting description field...');
-            
-            // Add bridge notice for eBay.ca listings
             let description = data.description;
-            if (isEbayCA && data.originalUrl) {
-                description += `\n\n--- Bridged from eBay.com ---\nOriginal listing: ${data.originalUrl}`;
-            }
-            
             let descriptionSet = false;
             
             // Method 1: Try the rich text editor iframe approach first
             const descriptionIframe = document.querySelector('iframe[id*="se-rte-frame"]');
             if (descriptionIframe) {
-                console.log('📝 Found description iframe, waiting for it to be ready...');
                 try {
                     // Wait for iframe to be fully loaded and contenteditable div to be available
                     const editableDiv = await waitForIframeReady(descriptionIframe);
-                    
-                    console.log('✅ Found contenteditable div in iframe');
                     
                     // Set the content (convert newlines to <br> for HTML)
                     const htmlDescription = description.replace(/\n/g, '<br>');
@@ -206,8 +195,6 @@ async function fillFields(data) {
                     editableDiv.blur();
                     editableDiv.dispatchEvent(new Event('blur', { bubbles: true }));
                     
-                    console.log('✅ Triggered focus/blur sequence to activate eBay auto-save');
-                    
                     // Also trigger events on the iframe itself
                     descriptionIframe.dispatchEvent(new Event('input', { bubbles: true }));
                     descriptionIframe.dispatchEvent(new Event('change', { bubbles: true }));
@@ -219,13 +206,11 @@ async function fillFields(data) {
                         hiddenTextarea.dispatchEvent(new Event('input', { bubbles: true }));
                         hiddenTextarea.dispatchEvent(new Event('change', { bubbles: true }));
                         hiddenTextarea.dispatchEvent(new Event('blur', { bubbles: true }));
-                        console.log('✅ Also updated hidden textarea for synchronization');
                     }
                     
                     // Wait a bit more to allow the API call to complete
                     await new Promise(resolve => setTimeout(resolve, 500));
                     
-                    console.log('✅ Description set in iframe successfully with auto-save trigger');
                     descriptionSet = true;
                     
                 } catch (error) {
@@ -237,7 +222,6 @@ async function fillFields(data) {
             if (!descriptionSet) {
                 const descTextarea = document.querySelector('textarea[name="description"]');
                 if (descTextarea) {
-                    console.log('📝 Using fallback textarea method');
                     descTextarea.value = description;
                     descTextarea.dispatchEvent(new Event('input', { bubbles: true }));
                     descTextarea.dispatchEvent(new Event('change', { bubbles: true }));
@@ -247,7 +231,6 @@ async function fillFields(data) {
             
             // Method 3: Try other possible selectors
             if (!descriptionSet) {
-                console.log('🔍 Trying alternative description selectors...');
                 const alternativeSelectors = [
                     'textarea[data-testid="richEditor"]',
                     'textarea[placeholder*="description"]',
@@ -257,8 +240,6 @@ async function fillFields(data) {
                 for (const selector of alternativeSelectors) {
                     const element = document.querySelector(selector);
                     if (element) {
-                        console.log(`📝 Found description element with selector: ${selector}`);
-                        
                         if (element.tagName.toLowerCase() === 'textarea') {
                             element.value = description;
                             element.dispatchEvent(new Event('input', { bubbles: true }));
@@ -278,9 +259,6 @@ async function fillFields(data) {
                 console.warn('⚠️ Could not find any description field to populate');
             } else {
                 // Additional step: Check if eBay's auto-save system is active and try to trigger it
-                console.log('🔄 Checking for eBay auto-save system...');
-                
-                // Look for signs that eBay has an auto-save mechanism
                 setTimeout(async () => {
                     try {
                         // Try to find the description field again and trigger one more blur event
@@ -293,11 +271,10 @@ async function fillFields(data) {
                                 editableDiv.focus();
                                 await new Promise(resolve => setTimeout(resolve, 100));
                                 editableDiv.blur();
-                                console.log('✅ Final auto-save trigger completed');
                             }
                         }
                     } catch (error) {
-                        console.log('ℹ️ Final auto-save trigger failed (this may be normal)');
+                        // Silent failure is okay here
                     }
                 }, 1000); // Wait 1 second after the main operation
             }
@@ -324,19 +301,16 @@ async function fillFields(data) {
         // Check for and click "Show more" button if it exists and is not expanded
         const showMoreButton = document.querySelector('button[_track="1.ATTRIBUTES.0.ShowMore"][aria-expanded="false"]');
         if (showMoreButton) {
-            console.log('🔽 Clicking Show more button to reveal additional fields');
             showMoreButton.click();
             await new Promise(resolve => setTimeout(resolve, 1500)); // Wait longer for fields to appear
         }
 
         // DYNAMIC FIELD DETECTION AND FILLING
-        console.log('🔍 Starting dynamic field detection...');
         
         // Get all attribute buttons on the page
         const attributeButtons = document.querySelectorAll('button[name^="attributes."]');
-        console.log(`📋 Found ${attributeButtons.length} attribute fields on page`);
         
-        // Create a mapping of common field variations to JSON property names
+        // Create a comprehensive mapping for field normalization
         const fieldMappings = {
             // Direct mappings
             'brand': 'brand',
@@ -347,7 +321,7 @@ async function fillFields(data) {
             'rise': 'rise',
             'inseam': 'inseam',
             'waist size': 'waistSize',
-            'fabric wash': 'wash',
+            'fabric wash': 'fabricWash',  // Updated to match extraction
             'closure': 'closure',
             'type': 'type',
             'fabric type': 'fabricType',
@@ -356,10 +330,8 @@ async function fillFields(data) {
             'collar style': 'collarStyle',
             'chest size': 'chestSize',
             'shirt length': 'shirtLength',
-            'country/region of manufacture': 'country',
+            'country/region of manufacture': 'countryRegionOfManufacture',  // Updated to match extraction
             'material': 'material',
-            
-            // Additional mappings for fields that might be present
             'pattern': 'pattern',
             'season': 'season',
             'occasion': 'occasion',
@@ -382,8 +354,6 @@ async function fillFields(data) {
             'hood': 'hood',
             'cuff': 'cuff',
             'hem': 'hem',
-            
-            // Newly discovered fields
             'product line': 'productLine',
             'pocket type': 'pocketType',
             'garment care': 'garmentCare',
@@ -396,27 +366,34 @@ async function fillFields(data) {
             const attributeName = button.getAttribute('name').replace('attributes.', '');
             const normalizedName = attributeName.toLowerCase();
             
-            // Skip if we already filled these basic fields
+            // Skip basic fields already handled
             if (['brand', 'size', 'color'].includes(normalizedName)) {
                 continue;
             }
             
-            // Find matching JSON property
-            const jsonProperty = fieldMappings[normalizedName];
+            // Try to find matching JSON property using field mappings first
+            let jsonProperty = fieldMappings[normalizedName];
             
-            if (jsonProperty && data[jsonProperty]) {
+            // If not in mapping, try dynamic conversion (same as extraction)
+            if (!jsonProperty) {
+                jsonProperty = attributeName
+                    .toLowerCase()
+                    .replace(/[^a-zA-Z0-9]/g, ' ')
+                    .trim()
+                    .split(' ')
+                    .map((word, index) => index === 0 ? word : word.charAt(0).toUpperCase() + word.slice(1))
+                    .join('');
+            }
+            
+            // Check if we have data for this field
+            if (data[jsonProperty] && data[jsonProperty] !== '' && 
+                !(Array.isArray(data[jsonProperty]) && data[jsonProperty].length === 0)) {
+                
                 const value = data[jsonProperty];
                 
-                // Skip empty values
-                if (!value || (Array.isArray(value) && value.length === 0) || value === '') {
-                    continue;
-                }
-                
-                console.log(`🎯 Filling ${attributeName}: ${value}`);
-                
                 try {
-                    if (jsonProperty === 'material' && Array.isArray(value)) {
-                        // Handle multi-select material field
+                    if (['material', 'theme'].includes(jsonProperty) && Array.isArray(value)) {
+                        // Handle multi-select fields (material, theme)
                         await fillMultiSelect(
                             `button[name="attributes.${attributeName}"]`,
                             'input[aria-label="Search or enter your own. Search results appear below"]',
@@ -434,39 +411,71 @@ async function fillFields(data) {
                 } catch (error) {
                     console.warn(`⚠️ Failed to fill ${attributeName}:`, error.message);
                 }
-            } else if (jsonProperty) {
-                console.log(`📝 Field ${attributeName} found on page but no data in JSON (${jsonProperty})`);
             } else {
-                console.log(`🔍 Unknown field found: ${attributeName} - consider adding to fieldMappings`);
+                console.log(`📝 Field ${attributeName} found on page but no data in JSON (${jsonProperty})`);
             }
         }
 
         // Check for JSON fields that weren't found on the page
         console.log('🔍 Checking for JSON fields not found on page...');
-        const pageFieldNames = Array.from(attributeButtons).map(button => 
-            button.getAttribute('name').replace('attributes.', '').toLowerCase()
-        );
+        const pageFieldNames = Array.from(attributeButtons).map(button => {
+            const attributeName = button.getAttribute('name').replace('attributes.', '');
+            return attributeName.toLowerCase();
+        });
         
         // Check each JSON property against available page fields
-        Object.entries(fieldMappings).forEach(([pageFieldName, jsonProperty]) => {
-            if (data[jsonProperty] && data[jsonProperty] !== '' && 
-                !(Array.isArray(data[jsonProperty]) && data[jsonProperty].length === 0)) {
-                
-                // Skip basic fields we already handled
-                if (['brand', 'size', 'color'].includes(pageFieldName)) {
-                    return;
+        Object.keys(data).forEach(jsonKey => {
+            // Skip non-attribute fields
+            if (['source', 'templateType', 'title', 'sku', 'priceCAD', 'priceUSD', 
+                 'description', 'condition', 'conditionDescription', 'adRate', 
+                 'originalUrl', 'extractedAt'].includes(jsonKey)) {
+                return;
+            }
+            
+            // Skip basic fields we already handled
+            if (['brand', 'size', 'color'].includes(jsonKey)) {
+                return;
+            }
+            
+            // Skip empty values
+            if (!data[jsonKey] || data[jsonKey] === '' || 
+                (Array.isArray(data[jsonKey]) && data[jsonKey].length === 0)) {
+                return;
+            }
+            
+            // Try to find corresponding page field
+            let foundOnPage = false;
+            
+            // First check direct matches in fieldMappings
+            for (const [pageField, jsonProperty] of Object.entries(fieldMappings)) {
+                if (jsonProperty === jsonKey && pageFieldNames.includes(pageField)) {
+                    foundOnPage = true;
+                    break;
                 }
+            }
+            
+            // If not found, try dynamic conversion back to page field name
+            if (!foundOnPage) {
+                // Convert camelCase back to potential page field names
+                const potentialPageFields = [
+                    // Direct lowercase
+                    jsonKey.toLowerCase(),
+                    // Add spaces before capitals
+                    jsonKey.replace(/([A-Z])/g, ' $1').toLowerCase().trim(),
+                    // Add spaces and slashes
+                    jsonKey.replace(/([A-Z])/g, '/$1').toLowerCase().trim()
+                ];
                 
-                if (!pageFieldNames.includes(pageFieldName)) {
-                    console.log(`⚠️ JSON has data for "${jsonProperty}" (${data[jsonProperty]}) but field "${pageFieldName}" not found on page`);
-                }
+                foundOnPage = potentialPageFields.some(field => pageFieldNames.includes(field));
+            }
+            
+            if (!foundOnPage) {
+                console.log(`⚠️ JSON has data for "${jsonKey}" (${data[jsonKey]}) but no corresponding field found on page`);
             }
         });
 
         // Handle condition selection
         if (data.condition) {
-            console.log('🏷️ Setting condition:', data.condition);
-            
             // Create mapping for common condition values
             const conditionMappings = {
                 'new with tags': 'New with tags',
@@ -492,7 +501,6 @@ async function fillFields(data) {
             
             for (const button of conditionButtons) {
                 if (button.textContent.trim() === mappedCondition) {
-                    console.log(`✅ Found and clicking condition button: ${mappedCondition}`);
                     button.click();
                     conditionSet = true;
                     break;
@@ -503,7 +511,6 @@ async function fillFields(data) {
             if (!conditionSet) {
                 const moreOptionsButton = document.querySelector('.condition-recommendation-more-values');
                 if (moreOptionsButton) {
-                    console.log('🔍 Condition not found in visible options, clicking "..." for more');
                     moreOptionsButton.click();
                     
                     // Wait for more options to appear and try again
@@ -512,7 +519,6 @@ async function fillFields(data) {
                     const allConditionButtons = document.querySelectorAll('.condition-recommendation-value');
                     for (const button of allConditionButtons) {
                         if (button.textContent.trim() === mappedCondition) {
-                            console.log(`✅ Found condition in expanded options: ${mappedCondition}`);
                             button.click();
                             conditionSet = true;
                             break;
@@ -529,8 +535,6 @@ async function fillFields(data) {
         // Wait a bit more to ensure all async operations are complete
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        console.log('✅ All fields filled successfully');
-        
         // Remove loading overlay
         removeLoadingOverlay();
         
@@ -539,14 +543,12 @@ async function fillFields(data) {
         if (saveForLaterButton) {
             saveForLaterButton.focus();
             saveForLaterButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            console.log('✅ Focused on Save for later button');
         } else {
             // Fallback to title input if save button not found
             if (titleInput) {
                 titleInput.focus();
                 titleInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
-            console.log('⚠️ Save for later button not found, focused on title input instead');
         }
         
     } catch (error) {
