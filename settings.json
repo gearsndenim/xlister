@@ -10,12 +10,13 @@
       "defaultTemplate": "https://www.ebay.ca/lstng?mode=AddItem",
       "categories": {
         "jeans": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650616013",
-
-        "hoodies": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_HOODIES_CA",
-        "jackets": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_JACKETS_CA",
-        "jackets_womens": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_JACKETS_WOMENS_CA",
+        "hoodies": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650766013",
+        "hoodies_womens": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650772013",
+        "jackets": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650767013",
+        "jackets_womens": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650769013",
         "jeans_womens": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650761013",
-        "pants": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_PANTS_CA",
+        "pants": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650770013",
+        "pants_womens": "https://www.ebay.ca/lstng?mode=AddItem&templateId=6650771013",
         "shirt_activewear": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHIRT_ACTIVEWEAR_CA",
         "shirt_button": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHIRT_BUTTON_CA",
         "shirt_polo": "https://www.ebay.ca/lstng?mode=AddItem&templateId=TEMPLATE_ID_SHIRT_POLO_CA",
