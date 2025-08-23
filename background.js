@@ -99,11 +99,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 if (urlMatch) {
                   let imageUrl = urlMatch[1];
                   
-                  // Clean up the URL - remove size parameters to get full-size image
-                  imageUrl = imageUrl
-                    .replace(/\$_\d+\./, '$_57.') // Change to high quality
-                    .replace(/\?set_id=\d+/, '') // Remove set_id parameter
-                    .replace(/\/s-l\d+\//, '/s-l1600/'); // Change to larger size if applicable
+                  // Convert thumbnail URL to full-size URL
+                  // From: https://i.ebayimg.com/00/s/MTQ0MFgxNDQw/z/w~AAAOSwbLhn~oJQ/$_57.JPG
+                  // To:   https://i.ebayimg.com/images/g/w~AAAOSwbLhn~oJQ/s-l1600.webp
+                  
+                  if (imageUrl.includes('/00/s/') && imageUrl.includes('/z/')) {
+                    // Extract the image ID (part after /z/)
+                    const imageIdMatch = imageUrl.match(/\/z\/([^\/]+)/);
+                    if (imageIdMatch) {
+                      const imageId = imageIdMatch[1].replace(/\$_.*$/, ''); // Remove size suffix
+                      imageUrl = `https://i.ebayimg.com/images/g/${imageId}/s-l1600.webp`;
+                      console.log(`🔄 Converted thumbnail to full-size: ${imageUrl}`);
+                    }
+                  } else {
+                    // Fallback: Clean up the URL for other formats
+                    imageUrl = imageUrl
+                      .replace(/\$_\d+\..*$/, '') // Remove size parameters completely
+                      .replace(/\?.*$/, ''); // Remove query parameters
+                  }
                   
                   if (!images.includes(imageUrl)) {
                     console.log(`✅ Found eBay thumbnail image ${index + 1}: ${imageUrl}`);
@@ -137,11 +150,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                   if (imageUrl && !images.includes(imageUrl)) {
                     console.log(`🖼️ Processing image ${index + 1}: ${imageUrl}`);
                     
-                    // Clean up the URL
-                    imageUrl = imageUrl
-                      .replace(/\/s-l\d+\./, '/s-l1600.') // Change to larger size
-                      .replace(/\$_\d+\./, '$_57.') // Remove size parameter
-                      .replace(/\?.*$/, ''); // Remove query parameters
+                    // Convert eBay thumbnail URLs to full-size URLs
+                    if (imageUrl.includes('/00/s/') && imageUrl.includes('/z/')) {
+                      // Extract the image ID (part after /z/)
+                      const imageIdMatch = imageUrl.match(/\/z\/([^\/]+)/);
+                      if (imageIdMatch) {
+                        const imageId = imageIdMatch[1].replace(/\$_.*$/, ''); // Remove size suffix
+                        imageUrl = `https://i.ebayimg.com/images/g/${imageId}/s-l1600.webp`;
+                        console.log(`🔄 Converted thumbnail to full-size: ${imageUrl}`);
+                      }
+                    } else {
+                      // Clean up the URL for other formats
+                      imageUrl = imageUrl
+                        .replace(/\/s-l\d+\./, '/s-l1600.') // Change to larger size
+                        .replace(/\$_\d+\..*$/, '') // Remove size parameter completely
+                        .replace(/\?.*$/, ''); // Remove query parameters
+                    }
                     
                     // Only include actual product images (not UI icons, etc.)
                     const isEbayImage = imageUrl.includes('ebayimg.com');
@@ -594,32 +618,66 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.action === 'fetchImageAsBlob') {
+    // Clean up the image URL - remove potential eBay URL artifacts
+    let cleanUrl = msg.imageUrl;
+    if (cleanUrl.endsWith('F') && cleanUrl.includes('$_')) {
+      // Remove the trailing 'F' from malformed eBay URLs like '$_57.JPGF'
+      cleanUrl = cleanUrl.slice(0, -1);
+    }
+    
+    // Check if this is a small thumbnail (likely from expired listing)
+    const isSmallThumbnail = cleanUrl.includes('$_57') || cleanUrl.includes('$_12') || cleanUrl.includes('$_35');
+    
     console.log('📩 Received fetchImageAsBlob request for:', msg.imageUrl);
+    if (cleanUrl !== msg.imageUrl) {
+      console.log('🧹 Cleaned URL:', cleanUrl);
+    }
+    
+    if (isSmallThumbnail) {
+      console.warn('⚠️ This appears to be a small thumbnail, likely from an expired listing');
+    }
     
     // Fetch the image and convert to base64
-    fetch(msg.imageUrl)
+    fetch(cleanUrl)
       .then(response => {
+        console.log('📡 Fetch response status:', response.status);
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         return response.blob();
       })
       .then(blob => {
+        console.log('📦 Blob received, size:', blob.size, 'type:', blob.type);
+        
+        // Check if blob is too small (likely a broken thumbnail)
+        if (blob.size < 1000) { // Less than 1KB is probably broken
+          throw new Error(`Image too small (${blob.size} bytes) - likely from expired listing`);
+        }
+        
+        // In service worker context, we can't use Image/Canvas directly
+        // Convert blob to base64 directly and let content script handle resizing
         return new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onloadend = () => {
             const base64Data = reader.result.split(',')[1]; // Remove data:image/...;base64, prefix
+            console.log('✅ Base64 conversion completed, length:', base64Data.length);
             resolve({
               success: true,
               base64Data: base64Data,
-              mimeType: blob.type
+              mimeType: blob.type,
+              originalDimensions: 'unknown', // Will be determined in content script
+              finalDimensions: 'unknown'
             });
           };
-          reader.onerror = reject;
+          reader.onerror = (error) => {
+            console.error('❌ FileReader error:', error);
+            reject(error);
+          };
           reader.readAsDataURL(blob);
         });
       })
       .then(result => {
+        console.log(`✅ Image processed: ${result.originalDimensions} → ${result.finalDimensions}`);
         sendResponse(result);
       })
       .catch(error => {

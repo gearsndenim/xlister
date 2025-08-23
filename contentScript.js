@@ -1170,33 +1170,106 @@ async function uploadSingleImage(imageUrl, uploadElement) {
 
 async function urlToFile(imageUrl) {
     try {
+        console.log('🌐 Requesting image from background script:', imageUrl);
+        
         // Send message to background script to fetch the image
         return new Promise((resolve, reject) => {
             chrome.runtime.sendMessage({
                 action: 'fetchImageAsBlob',
                 imageUrl: imageUrl
             }, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.error('❌ Chrome runtime error:', chrome.runtime.lastError);
+                    reject(new Error(chrome.runtime.lastError.message));
+                    return;
+                }
+                
                 if (response && response.success) {
                     // Convert base64 to blob
                     const base64Data = response.base64Data;
                     const mimeType = response.mimeType || 'image/jpeg';
                     
-                    // Convert base64 to blob
-                    const byteCharacters = atob(base64Data);
-                    const byteNumbers = new Array(byteCharacters.length);
-                    for (let i = 0; i < byteCharacters.length; i++) {
-                        byteNumbers[i] = byteCharacters.charCodeAt(i);
+                    console.log(`📐 Image dimensions: ${response.originalDimensions} → ${response.finalDimensions}`);
+                    
+                    try {
+                        // Convert base64 to blob
+                        const byteCharacters = atob(base64Data);
+                        const byteNumbers = new Array(byteCharacters.length);
+                        for (let i = 0; i < byteCharacters.length; i++) {
+                            byteNumbers[i] = byteCharacters.charCodeAt(i);
+                        }
+                        const byteArray = new Uint8Array(byteNumbers);
+                        const blob = new Blob([byteArray], { type: mimeType });
+                        
+                        // Check and resize the image if needed in content script
+                        const img = new Image();
+                        img.onload = () => {
+                            const originalWidth = img.width;
+                            const originalHeight = img.height;
+                            
+                            console.log(`📏 Image dimensions: ${originalWidth}x${originalHeight}`);
+                            
+                            // Skip images that are too small (thumbnails from expired listings)
+                            if (originalWidth < 100 || originalHeight < 100) {
+                                reject(new Error(`Image too small (${originalWidth}x${originalHeight}) - likely thumbnail from expired listing`));
+                                return;
+                            }
+                            
+                            let newWidth = originalWidth;
+                            let newHeight = originalHeight;
+                            
+                            // If width is less than 500px, scale up to 500px width while maintaining aspect ratio
+                            if (originalWidth < 500) {
+                                const scaleFactor = 500 / originalWidth;
+                                newWidth = 500;
+                                newHeight = Math.round(originalHeight * scaleFactor);
+                                console.log(`📈 Scaling up image to: ${newWidth}x${newHeight}`);
+                            }
+                            
+                            if (newWidth !== originalWidth || newHeight !== originalHeight) {
+                                // Need to resize
+                                const canvas = document.createElement('canvas');
+                                const ctx = canvas.getContext('2d');
+                                
+                                canvas.width = newWidth;
+                                canvas.height = newHeight;
+                                
+                                ctx.drawImage(img, 0, 0, newWidth, newHeight);
+                                
+                                canvas.toBlob((resizedBlob) => {
+                                    const filename = imageUrl.split('/').pop().split('?')[0] || 'image.jpg';
+                                    const file = new File([resizedBlob], filename, { type: 'image/jpeg' });
+                                    
+                                    console.log(`📁 Created resized file: ${filename} (${(resizedBlob.size / 1024).toFixed(1)}KB) ${newWidth}x${newHeight}`);
+                                    resolve(file);
+                                }, 'image/jpeg', 0.9);
+                            } else {
+                                // No resize needed
+                                const filename = imageUrl.split('/').pop().split('?')[0] || 'image.jpg';
+                                const file = new File([blob], filename, { type: mimeType });
+                                
+                                console.log(`📁 Created file: ${filename} (${(blob.size / 1024).toFixed(1)}KB) ${originalWidth}x${originalHeight}`);
+                                resolve(file);
+                            }
+                        };
+                        
+                        img.onerror = (error) => {
+                            console.error('❌ Image load error:', error);
+                            reject(new Error('Failed to load image for resizing'));
+                        };
+                        
+                        // Create object URL from blob to load into image
+                        const objectUrl = URL.createObjectURL(blob);
+                        img.src = objectUrl;
+                        
+                    } catch (conversionError) {
+                        console.error('❌ Error converting base64 to file:', conversionError);
+                        reject(conversionError);
                     }
-                    const byteArray = new Uint8Array(byteNumbers);
-                    const blob = new Blob([byteArray], { type: mimeType });
-                    
-                    // Create File object
-                    const filename = imageUrl.split('/').pop().split('?')[0] || 'image.jpg';
-                    const file = new File([blob], filename, { type: mimeType });
-                    
-                    resolve(file);
                 } else {
-                    reject(new Error(response?.error || 'Failed to fetch image'));
+                    const errorMsg = response?.error || 'Failed to fetch image';
+                    console.error('❌ Background script returned error:', errorMsg);
+                    reject(new Error(errorMsg));
                 }
             });
         });
@@ -1207,37 +1280,46 @@ async function urlToFile(imageUrl) {
 }
 
 async function simulateDragAndDrop(targetElement, file) {
-    // Create drag and drop events
-    const dragEnterEvent = new DragEvent('dragenter', {
-        bubbles: true,
-        cancelable: true,
-        dataTransfer: new DataTransfer()
-    });
-    
-    const dragOverEvent = new DragEvent('dragover', {
-        bubbles: true,
-        cancelable: true,
-        dataTransfer: new DataTransfer()
-    });
-    
-    const dropEvent = new DragEvent('drop', {
-        bubbles: true,
-        cancelable: true,
-        dataTransfer: new DataTransfer()
-    });
-    
-    // Add file to drop event
-    dropEvent.dataTransfer.items.add(file);
-    
-    // Simulate the drag and drop sequence
-    targetElement.dispatchEvent(dragEnterEvent);
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    targetElement.dispatchEvent(dragOverEvent);
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    targetElement.dispatchEvent(dropEvent);
-    await new Promise(resolve => setTimeout(resolve, 500));
+    try {
+        console.log('🎯 Starting drag and drop simulation with file:', file.name, file.size);
+        
+        // Create drag and drop events
+        const dragEnterEvent = new DragEvent('dragenter', {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: new DataTransfer()
+        });
+        
+        const dragOverEvent = new DragEvent('dragover', {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: new DataTransfer()
+        });
+        
+        const dropEvent = new DragEvent('drop', {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: new DataTransfer()
+        });
+        
+        // Add file to drop event
+        dropEvent.dataTransfer.items.add(file);
+        
+        // Simulate the drag and drop sequence
+        targetElement.dispatchEvent(dragEnterEvent);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        targetElement.dispatchEvent(dragOverEvent);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        targetElement.dispatchEvent(dropEvent);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        console.log('✅ Drag and drop simulation completed');
+    } catch (error) {
+        console.error('❌ Error in drag and drop simulation:', error);
+        throw error;
+    }
 }
 
 async function saveDraft() {
