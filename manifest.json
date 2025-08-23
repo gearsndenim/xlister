@@ -12,7 +12,9 @@
   "host_permissions": [
     "https://*.ebay.com/*",
     "https://*.ebay.ca/*",
-    "https://*.chatgpt.com/*"
+    "https://*.chatgpt.com/*",
+    "https://*.ebayimg.com/*",
+    "https://*.ebaystatic.com/*"
   ],
   "content_scripts": [
     {

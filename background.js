@@ -81,6 +81,108 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             settings = { currency: { usdToCadRate: 1.35 } };
           }
 
+          // Function to extract images from the listing page
+          function extractImages() {
+            const images = [];
+            
+            console.log('🔍 Starting image extraction...');
+            
+            // Method 1: Extract from eBay's thumbnail buttons (background-image style)
+            const thumbnailButtons = document.querySelectorAll('.uploader-thumbnails-ux__image[style*="background-image"]');
+            console.log(`📋 Found ${thumbnailButtons.length} thumbnail buttons with background images`);
+            
+            thumbnailButtons.forEach((button, index) => {
+              const style = button.getAttribute('style');
+              if (style) {
+                // Extract URL from background-image: url('...')
+                const urlMatch = style.match(/background-image:\s*url\(['"]?([^'"]*?)['"]?\)/);
+                if (urlMatch) {
+                  let imageUrl = urlMatch[1];
+                  
+                  // Clean up the URL - remove size parameters to get full-size image
+                  imageUrl = imageUrl
+                    .replace(/\$_\d+\./, '$_57.') // Change to high quality
+                    .replace(/\?set_id=\d+/, '') // Remove set_id parameter
+                    .replace(/\/s-l\d+\//, '/s-l1600/'); // Change to larger size if applicable
+                  
+                  if (!images.includes(imageUrl)) {
+                    console.log(`✅ Found eBay thumbnail image ${index + 1}: ${imageUrl}`);
+                    images.push(imageUrl);
+                  }
+                }
+              }
+            });
+            
+            // Method 2: Try traditional img selectors as fallback
+            if (images.length === 0) {
+              console.log('🔄 No thumbnail buttons found, trying traditional img selectors...');
+              
+              const imageSelectors = [
+                'img[src*="ebayimg.com"]',
+                'img[src*="i.ebayimg.com"]',
+                'img[src*="thumbs.ebaystatic.com"]',
+                '.photo-container img',
+                '.image-preview img',
+                '.gallery img',
+                'img'
+              ];
+              
+              for (const selector of imageSelectors) {
+                const imageElements = document.querySelectorAll(selector);
+                console.log(`📋 Found ${imageElements.length} images with selector: ${selector}`);
+                
+                imageElements.forEach((img, index) => {
+                  let imageUrl = img.src || img.getAttribute('data-src') || img.getAttribute('data-original');
+                  
+                  if (imageUrl && !images.includes(imageUrl)) {
+                    console.log(`🖼️ Processing image ${index + 1}: ${imageUrl}`);
+                    
+                    // Clean up the URL
+                    imageUrl = imageUrl
+                      .replace(/\/s-l\d+\./, '/s-l1600.') // Change to larger size
+                      .replace(/\$_\d+\./, '$_57.') // Remove size parameter
+                      .replace(/\?.*$/, ''); // Remove query parameters
+                    
+                    // Only include actual product images (not UI icons, etc.)
+                    const isEbayImage = imageUrl.includes('ebayimg.com');
+                    const isNotUIElement = !imageUrl.includes('icon') && 
+                                          !imageUrl.includes('logo') &&
+                                          !imageUrl.includes('sprite') &&
+                                          !imageUrl.includes('button') &&
+                                          !imageUrl.includes('arrow');
+                    const isReasonableSize = img.width > 50 && img.height > 50;
+                    
+                    if (isEbayImage && isNotUIElement && isReasonableSize) {
+                      console.log(`✅ Added eBay image: ${imageUrl} (${img.width}x${img.height})`);
+                      images.push(imageUrl);
+                    } else if (!isEbayImage && img.width > 100 && img.height > 100) {
+                      // Include non-eBay images if they're large enough (user uploaded)
+                      console.log(`✅ Added user image: ${imageUrl} (${img.width}x${img.height})`);
+                      images.push(imageUrl);
+                    } else {
+                      console.log(`⚠️ Skipped image: ${imageUrl} (${img.width}x${img.height}) - isEbay:${isEbayImage}, notUI:${isNotUIElement}, goodSize:${isReasonableSize}`);
+                    }
+                  }
+                });
+                
+                // If we found images with this selector, we can break
+                if (images.length > 0) {
+                  console.log(`🎯 Found ${images.length} images with selector: ${selector}`);
+                  break;
+                }
+              }
+            }
+            
+            // Remove duplicates
+            const uniqueImages = [...new Set(images)];
+            console.log(`📸 Final image count: ${uniqueImages.length}`);
+            uniqueImages.forEach((url, index) => {
+              console.log(`📸 Image ${index + 1}: ${url}`);
+            });
+            
+            return uniqueImages;
+          }
+
           // Function to convert USD to CAD using settings
           function convertUsdToCad(usdPrice) {
             const exchangeRate = settings.currency.usdToCadRate || 1.35;
@@ -110,6 +212,97 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
             const conditionTextarea = document.querySelector('textarea[name="itemConditionDescription"]');
             if (conditionTextarea) data.conditionDescription = conditionTextarea.value.trim();
+
+            // Extract images
+            data.images = extractImages();
+
+            // Extract category information
+            // Try multiple methods to find the category
+            
+            // Method 1: Look for primary store category
+            const storeCategoryButton = document.querySelector('button[name="primaryStoreCategoryId"]');
+            if (storeCategoryButton) {
+              const categoryText = storeCategoryButton.textContent.trim();
+              // Clean up the category text - remove "Store category", "First category", etc.
+              const cleanCategory = categoryText
+                .replace(/Store category/gi, '')
+                .replace(/First category/gi, '')
+                .replace(/Second category/gi, '')
+                .replace(/–/g, '-')
+                .trim();
+              if (cleanCategory && cleanCategory !== 'Edit' && cleanCategory !== 'Select') {
+                data.category = cleanCategory;
+              }
+            }
+            
+            // Method 2: Look for main category selector
+            if (!data.category) {
+              const categoryButton = document.querySelector('button[name="categoryId"], button[aria-label*="Category"], button[aria-label*="category"]');
+              if (categoryButton) {
+                const categoryText = categoryButton.textContent.trim();
+                if (categoryText && !categoryText.includes('Select') && !categoryText.includes('Choose') && !categoryText.includes('Edit')) {
+                  data.category = categoryText;
+                }
+              }
+            }
+            
+            // Method 3: Look for category breadcrumb
+            if (!data.category) {
+              const categoryBreadcrumb = document.querySelector('.category-breadcrumb, .breadcrumb-category, [data-testid="category-breadcrumb"]');
+              if (categoryBreadcrumb) {
+                data.category = categoryBreadcrumb.textContent.trim();
+              }
+            }
+            
+            // Method 4: Look for breadcrumb navigation (get the most specific category)
+            if (!data.category) {
+              const breadcrumbs = document.querySelectorAll('nav[aria-label*="breadcrumb"] a, .breadcrumb a, [data-testid="breadcrumb"] a');
+              if (breadcrumbs.length > 1) {
+                // Take the second-to-last breadcrumb (last is usually the current item)
+                const categoryBreadcrumb = breadcrumbs[breadcrumbs.length - 2];
+                if (categoryBreadcrumb && categoryBreadcrumb.textContent.trim()) {
+                  data.category = categoryBreadcrumb.textContent.trim();
+                }
+              }
+            }
+            
+            // Method 5: Look for category in URL or page data
+            if (!data.category) {
+              // Check URL for category ID
+              const urlMatch = window.location.href.match(/categoryId=(\d+)/);
+              if (urlMatch) {
+                data.categoryId = urlMatch[1];
+              }
+            }
+            
+            // Method 6: Look for any element with category information (last resort)
+            if (!data.category) {
+              const categoryElements = document.querySelectorAll('[class*="category"]:not([class*="store"]), [data-testid*="category"], [aria-label*="category"]:not([aria-label*="store"])');
+              for (const element of categoryElements) {
+                const text = element.textContent.trim();
+                if (text && text.length > 3 && text.length < 100 && 
+                    !text.includes('Select') && !text.includes('Choose') && 
+                    !text.includes('Edit') && !text.includes('Store category')) {
+                  data.category = text;
+                  break;
+                }
+              }
+            }
+            
+            // Clean up category if found
+            if (data.category) {
+              // Remove common UI text that might have been captured
+              data.category = data.category
+                .replace(/\s*\(.*?\)/g, '') // Remove parenthetical content
+                .replace(/Edit$|Select$|Choose$/g, '') // Remove trailing UI text
+                .trim();
+              
+              // If category is too generic or empty after cleaning, remove it
+              if (!data.category || data.category.length < 3 || 
+                  ['Edit', 'Select', 'Choose', 'Category'].includes(data.category)) {
+                delete data.category;
+              }
+            }
 
             // FULLY DYNAMIC ATTRIBUTE EXTRACTION
             const attributeButtons = document.querySelectorAll('button[name^="attributes."]');
@@ -395,6 +588,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch(error => {
         console.error('❌ Failed to load settings:', error);
         sendResponse({ success: false, error: error.message });
+      });
+    
+    return true; // Will respond asynchronously
+  }
+
+  if (msg.action === 'fetchImageAsBlob') {
+    console.log('📩 Received fetchImageAsBlob request for:', msg.imageUrl);
+    
+    // Fetch the image and convert to base64
+    fetch(msg.imageUrl)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.blob();
+      })
+      .then(blob => {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64Data = reader.result.split(',')[1]; // Remove data:image/...;base64, prefix
+            resolve({
+              success: true,
+              base64Data: base64Data,
+              mimeType: blob.type
+            });
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      })
+      .then(result => {
+        sendResponse(result);
+      })
+      .catch(error => {
+        console.error('❌ Error fetching image:', error);
+        sendResponse({
+          success: false,
+          error: error.message
+        });
       });
     
     return true; // Will respond asynchronously
