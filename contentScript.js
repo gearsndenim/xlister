@@ -160,89 +160,201 @@ async function fillFields(data) {
             await new Promise(resolve => setTimeout(resolve, 1500)); // Wait longer for fields to appear
         }
 
-        // Fill ALL other fields AFTER "Show more" is clicked (many of these might be hidden)
-        // JEANS specific
-        if (data.style) await fillDropdown('button[name="attributes.Style"]', 'input[name="search-box-attributesStyle"]', data.style);
-        if (data.inseam) await fillDropdown('button[name="attributes.Inseam"]', 'input[name="search-box-attributesInseam"]', data.inseam);
-        if (data.fit) await fillDropdown('button[name="attributes.Fit"]', 'input[name="search-box-attributesFit"]', data.fit);
-        if (data.waistSize) await fillDropdown('button[name="attributes.Waist Size"]', 'input[name="search-box-attributesWaistSize"]', data.waistSize);
-        if (data.rise) await fillDropdown('button[name="attributes.Rise"]', 'input[name="search-box-attributesRise"]', data.rise);
-
-        // Hoodies specific
-        if (data.type) await fillDropdown('button[name="attributes.Type"]', 'input[name="search-box-attributesType"]', data.type);
-        if (data.fabricType) await fillDropdown('button[name="attributes.Fabric Type"]', 'input[name="search-box-attributesFabricType"]', data.fabricType);
-        if (data.neckline) await fillDropdown('button[name="attributes.Neckline"]', 'input[name="search-box-attributesNeckline"]', data.neckline);
-
-        // Polos specific
-        if (data.sleeveLength) await fillDropdown('button[name="attributes.Sleeve Length"]', 'input[name="search-box-attributesSleeveLength"]', data.sleeveLength);
-        if (data.collarStyle) await fillDropdown('button[name="attributes.Collar Style"]', 'input[name="search-box-attributesCollarStyle"]', data.collarStyle);
-        if (data.chestSize) await fillDropdown('button[name="attributes.Chest Size"]', 'input[name="search-box-attributesChestSize"]', data.chestSize);
-        if (data.shirtLength) await fillDropdown('button[name="attributes.Shirt Length"]', 'input[name="search-box-attributesShirtLength"]', data.shirtLength);
-
-        // Material and fabric fields
-        if (data.wash) await fillDropdown('button[name="attributes.Fabric Wash"]', 'input[name="search-box-attributesFabricWash"]', data.wash);
-        if (data.material) {
-            const materials = Array.isArray(data.material) ? data.material : [data.material];
-            await fillMultiSelect(
-                'button[name="attributes.Material"]',
-                'input[aria-label="Search or enter your own. Search results appear below"]',
-                materials
-            );
-        }
-        if (data.closure) await fillDropdown(
-            'button[name="attributes.Closure"]',
-            'input[name="search-box-attributesClosure"]',
-            data.closure
-        );
-
-        // Geographic and manufacturing fields
-        if (data.country) await fillDropdown('button[name="attributes.Country/Region of Manufacture"]', 'input[name="search-box-attributesCountryRegionofManufacture"]', data.country);
+        // DYNAMIC FIELD DETECTION AND FILLING
+        console.log('🔍 Starting dynamic field detection...');
         
-        // Additional common fields that might be under "Show more"
-        if (data.pattern) await fillDropdown('button[name="attributes.Pattern"]', 'input[name="search-box-attributesPattern"]', data.pattern);
-        if (data.sleeve) await fillDropdown('button[name="attributes.Sleeve"]', 'input[name="search-box-attributesSleeve"]', data.sleeve);
-        if (data.occasion) await fillDropdown('button[name="attributes.Occasion"]', 'input[name="search-box-attributesOccasion"]', data.occasion);
-        if (data.season) await fillDropdown('button[name="attributes.Season"]', 'input[name="search-box-attributesSeason"]', data.season);
-        if (data.vintage) await fillDropdown('button[name="attributes.Vintage"]', 'input[name="search-box-attributesVintage"]', data.vintage);
-        if (data.theme) {
-            console.log('🎨 Filling theme:', data.theme);
-            await fillDropdown('button[name="attributes.Theme"]', 'input[name="search-box-attributesTheme"]', data.theme);
-        }
-        if (data.character) await fillDropdown('button[name="attributes.Character"]', 'input[name="search-box-attributesCharacter"]', data.character);
-        if (data.department) await fillDropdown('button[name="attributes.Department"]', 'input[name="search-box-attributesDepartment"]', data.department);
-        if (data.model) {
-            console.log('🚗 Filling model:', data.model);
-            await fillDropdown('button[name="attributes.Model"]', 'input[name="search-box-attributesModel"]', data.model);
-        }
-        if (data.features) {
-            console.log('⭐ Filling features:', data.features);
-            await fillDropdown('button[name="attributes.Features"]', 'input[name="search-box-attributesFeatures"]', data.features);
-        }
-        if (data.performance) await fillDropdown('button[name="attributes.Performance/Activity"]', 'input[name="search-box-attributesPerformanceActivity"]', data.performance);
-        if (data.lining) await fillDropdown('button[name="attributes.Lining"]', 'input[name="search-box-attributesLining"]', data.lining);
-        if (data.accents) {
-            console.log('✨ Filling accents:', data.accents);
-            await fillDropdown('button[name="attributes.Accents"]', 'input[name="search-box-attributesAccents"]', data.accents);
+        // Get all attribute buttons on the page
+        const attributeButtons = document.querySelectorAll('button[name^="attributes."]');
+        console.log(`📋 Found ${attributeButtons.length} attribute fields on page`);
+        
+        // Create a mapping of common field variations to JSON property names
+        const fieldMappings = {
+            // Direct mappings
+            'brand': 'brand',
+            'size': 'size', 
+            'color': 'color',
+            'style': 'style',
+            'fit': 'fit',
+            'rise': 'rise',
+            'inseam': 'inseam',
+            'waist size': 'waistSize',
+            'fabric wash': 'wash',
+            'closure': 'closure',
+            'type': 'type',
+            'fabric type': 'fabricType',
+            'neckline': 'neckline',
+            'sleeve length': 'sleeveLength',
+            'collar style': 'collarStyle',
+            'chest size': 'chestSize',
+            'shirt length': 'shirtLength',
+            'country/region of manufacture': 'country',
+            'material': 'material',
+            
+            // Additional mappings for fields that might be present
+            'pattern': 'pattern',
+            'season': 'season',
+            'occasion': 'occasion',
+            'vintage': 'vintage',
+            'theme': 'theme',
+            'character': 'character',
+            'department': 'department',
+            'model': 'model',
+            'features': 'features',
+            'performance/activity': 'performance',
+            'lining': 'lining',
+            'accents': 'accents',
+            'sleeve': 'sleeve',
+            'length': 'length',
+            'heel height': 'heelHeight',
+            'toe style': 'toeStyle',
+            'fastening': 'fastening',
+            'pocket': 'pocket',
+            'placket': 'placket',
+            'hood': 'hood',
+            'cuff': 'cuff',
+            'hem': 'hem',
+            
+            // Newly discovered fields
+            'product line': 'productLine',
+            'pocket type': 'pocketType',
+            'garment care': 'garmentCare',
+            'mpn': 'mpn',
+            'unit type': 'unitType'
+        };
+
+        // Process each attribute button found on the page
+        for (const button of attributeButtons) {
+            const attributeName = button.getAttribute('name').replace('attributes.', '');
+            const normalizedName = attributeName.toLowerCase();
+            
+            // Skip if we already filled these basic fields
+            if (['brand', 'size', 'color'].includes(normalizedName)) {
+                continue;
+            }
+            
+            // Find matching JSON property
+            const jsonProperty = fieldMappings[normalizedName];
+            
+            if (jsonProperty && data[jsonProperty]) {
+                const value = data[jsonProperty];
+                
+                // Skip empty values
+                if (!value || (Array.isArray(value) && value.length === 0) || value === '') {
+                    continue;
+                }
+                
+                console.log(`🎯 Filling ${attributeName}: ${value}`);
+                
+                try {
+                    if (jsonProperty === 'material' && Array.isArray(value)) {
+                        // Handle multi-select material field
+                        await fillMultiSelect(
+                            `button[name="attributes.${attributeName}"]`,
+                            'input[aria-label="Search or enter your own. Search results appear below"]',
+                            value
+                        );
+                    } else {
+                        // Handle regular dropdown fields
+                        const searchInputName = `search-box-attributes${attributeName.replace(/[^a-zA-Z]/g, '')}`;
+                        await fillDropdown(
+                            `button[name="attributes.${attributeName}"]`,
+                            `input[name="${searchInputName}"]`,
+                            Array.isArray(value) ? value[0] : value
+                        );
+                    }
+                } catch (error) {
+                    console.warn(`⚠️ Failed to fill ${attributeName}:`, error.message);
+                }
+            } else if (jsonProperty) {
+                console.log(`📝 Field ${attributeName} found on page but no data in JSON (${jsonProperty})`);
+            } else {
+                console.log(`🔍 Unknown field found: ${attributeName} - consider adding to fieldMappings`);
+            }
         }
 
-        // Handle ads section
-        const adToggle = document.querySelector('[class="promoted-listing-program-wrapper"] input[type="checkbox"]');
-        if (adToggle && !adToggle.checked) {
-            adToggle.click();
-        }
+        // Check for JSON fields that weren't found on the page
+        console.log('🔍 Checking for JSON fields not found on page...');
+        const pageFieldNames = Array.from(attributeButtons).map(button => 
+            button.getAttribute('name').replace('attributes.', '').toLowerCase()
+        );
+        
+        // Check each JSON property against available page fields
+        Object.entries(fieldMappings).forEach(([pageFieldName, jsonProperty]) => {
+            if (data[jsonProperty] && data[jsonProperty] !== '' && 
+                !(Array.isArray(data[jsonProperty]) && data[jsonProperty].length === 0)) {
+                
+                // Skip basic fields we already handled
+                if (['brand', 'size', 'color'].includes(pageFieldName)) {
+                    return;
+                }
+                
+                if (!pageFieldNames.includes(pageFieldName)) {
+                    console.log(`⚠️ JSON has data for "${jsonProperty}" (${data[jsonProperty]}) but field "${pageFieldName}" not found on page`);
+                }
+            }
+        });
 
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        const adRateInput = document.querySelector('input[name="adRate"]');
-        if (adRateInput) {
-            const adRateValue = data.adRate ? parseFloat(data.adRate) : (settings.defaults.adRate ? parseFloat(settings.defaults.adRate) : 6.0);
-            adRateInput.focus();
-            adRateInput.value = adRateValue.toFixed(1);
-            adRateInput.dispatchEvent(new Event('input', { bubbles: true }));
-            adRateInput.dispatchEvent(new Event('change', { bubbles: true }));
-
-            // Simulate blur to finalize the change
-            adRateInput.blur();
+        // Handle condition selection
+        if (data.condition) {
+            console.log('🏷️ Setting condition:', data.condition);
+            
+            // Create mapping for common condition values
+            const conditionMappings = {
+                'new with tags': 'New with tags',
+                'new': 'New with tags',
+                'pre-owned': 'Pre-owned - Good',
+                'pre-owned - good': 'Pre-owned - Good',
+                'good': 'Pre-owned - Good',
+                'used': 'Pre-owned - Good',
+                'pre-owned - excellent': 'Pre-owned - Excellent',
+                'excellent': 'Pre-owned - Excellent',
+                'pre-owned - very good': 'Pre-owned - Very Good',
+                'very good': 'Pre-owned - Very Good',
+                'pre-owned - fair': 'Pre-owned - Fair',
+                'fair': 'Pre-owned - Fair'
+            };
+            
+            const normalizedCondition = data.condition.toLowerCase();
+            const mappedCondition = conditionMappings[normalizedCondition] || data.condition;
+            
+            // Try to find and click the condition button
+            const conditionButtons = document.querySelectorAll('.condition-recommendation-value');
+            let conditionSet = false;
+            
+            for (const button of conditionButtons) {
+                if (button.textContent.trim() === mappedCondition) {
+                    console.log(`✅ Found and clicking condition button: ${mappedCondition}`);
+                    button.click();
+                    conditionSet = true;
+                    break;
+                }
+            }
+            
+            // If not found in visible buttons, try the "..." more options button
+            if (!conditionSet) {
+                const moreOptionsButton = document.querySelector('.condition-recommendation-more-values');
+                if (moreOptionsButton) {
+                    console.log('🔍 Condition not found in visible options, clicking "..." for more');
+                    moreOptionsButton.click();
+                    
+                    // Wait for more options to appear and try again
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    const allConditionButtons = document.querySelectorAll('.condition-recommendation-value');
+                    for (const button of allConditionButtons) {
+                        if (button.textContent.trim() === mappedCondition) {
+                            console.log(`✅ Found condition in expanded options: ${mappedCondition}`);
+                            button.click();
+                            conditionSet = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (!conditionSet) {
+                console.warn(`⚠️ Could not find condition button for: ${data.condition} (mapped to: ${mappedCondition})`);
+            }
         }
 
         // Wait a bit more to ensure all async operations are complete
@@ -357,13 +469,16 @@ async function saveDraft() {
 
 
 chrome.runtime.onMessage.addListener((msg) => {
-    if (!msg || !msg.action || !msg.data) return;
+    if (!msg || !msg.action) return;
 
     if (msg.action === 'update' || msg.action === 'fillForm') {
         console.log('🔄 Filling eBay.ca form with bridged data:', msg.data);
         fillFields(msg.data);
     } else if (msg.action === 'save') {
         fillFields(msg.data).then(saveDraft);
+    } else if (msg.action === 'extractedEbayComData') {
+        console.log('📦 Received extracted eBay.com data in content script');
+        // This is for manual popup workflow - just log for now
     }
 });
 
@@ -383,5 +498,75 @@ window.addEventListener('message', function(event) {
                 console.log('❌ No saved data found for bridging');
             }
         });
+    }
+});
+
+// Keyboard shortcut handler: Cmd+Period (Mac) or Ctrl+Period (Windows/Linux)
+document.addEventListener('keydown', function(event) {
+    // Check for Cmd+Period (Mac) or Ctrl+Period (Windows/Linux)
+    const isShortcut = (event.metaKey || event.ctrlKey) && event.key === '.';
+    
+    if (isShortcut) {
+        event.preventDefault();
+        console.log('⌨️ Keyboard shortcut triggered (Cmd/Ctrl + Period)');
+        
+        const currentUrl = window.location.href;
+        
+        // Determine action based on current page
+        if (currentUrl.includes('ebay.ca') && currentUrl.includes('/lstng')) {
+            // eBay.ca listing page - Fill form with saved data
+            console.log('🇨🇦 eBay.ca listing detected - filling form with saved data');
+            chrome.storage.local.get('latestEbayJson', ({ latestEbayJson }) => {
+                if (latestEbayJson) {
+                    console.log('📦 Found saved data, filling form');
+                    fillFields(latestEbayJson);
+                } else {
+                    alert('⚠️ No saved JSON data found. Please extract data from an eBay.com listing first.');
+                }
+            });
+            
+        } else if (currentUrl.includes('ebay.com') && (currentUrl.includes('/lstng') || currentUrl.includes('/sl/list'))) {
+            // eBay.com listing page - Extract data and bridge to eBay.ca
+            console.log('🇺🇸 eBay.com listing detected - extracting data and bridging to eBay.ca');
+            
+            // Start the extraction with keyboard shortcut flag
+            console.log('📤 Sending extraction request with keyboard shortcut flag');
+            chrome.runtime.sendMessage({ 
+                action: "extractEbayComListing",
+                fromKeyboardShortcut: true 
+            }, (response) => {
+                console.log('📥 Response from background script:', response);
+            });
+            
+        } else if (currentUrl.includes('ebay.com') && currentUrl.includes('/itm/')) {
+            // eBay.com item page - Navigate to edit mode
+            console.log('📦 eBay.com item detected - navigating to edit mode');
+            const itemIdMatch = currentUrl.match(/\/itm\/(\d+)/);
+            
+            if (itemIdMatch) {
+                const itemId = itemIdMatch[1];
+                const editUrl = `https://www.ebay.com/sl/list?itemId=${itemId}&mode=ReviseItem`;
+                console.log('🔄 Navigating to edit mode:', editUrl);
+                window.location.href = editUrl;
+            } else {
+                alert('❌ Could not extract item ID from URL');
+            }
+            
+        } else if (currentUrl.includes('chatgpt.com')) {
+            // ChatGPT page - Extract JSON and create listing
+            console.log('🤖 ChatGPT detected - extracting JSON');
+            chrome.runtime.sendMessage({ action: "extractJsonFromChatGPT" });
+            
+        } else {
+            // Unknown page - show help
+            alert(`⌨️ Keyboard Shortcut Help (Cmd/Ctrl + Period):
+
+🇺🇸 eBay.com listing page: Extract data & bridge to eBay.ca
+📦 eBay.com item page: Navigate to edit mode  
+🇨🇦 eBay.ca listing page: Fill form with saved data
+🤖 ChatGPT page: Extract JSON from conversation
+
+Current page not supported: ${window.location.hostname}`);
+        }
     }
 });

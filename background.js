@@ -1,4 +1,6 @@
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  console.log('🔧 Background script received message:', msg.action);
+  
   if (msg.action === 'extractJsonFromChatGPT') {
     console.log('📩 Received extractJsonFromChatGPT trigger');
 
@@ -49,18 +51,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'extractEbayComListing') {
     console.log('📩 Received extractEbayComListing trigger');
 
+    // Check if this was triggered by keyboard shortcut
+    const isFromKeyboardShortcut = msg.fromKeyboardShortcut === true;
+    console.log('🔍 Is from keyboard shortcut:', isFromKeyboardShortcut);
+
     chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
       if (!tab || !tab.url.includes('ebay.com') || !(tab.url.includes('/lstng') || tab.url.includes('/sl/list'))) {
         console.log('❌ Not an eBay.com listing page, skipping');
+        sendResponse({ success: false, error: 'Not an eBay.com listing page' });
         return;
       }
 
       console.log('✅ eBay.com listing page found. Injecting extraction script...');
+      sendResponse({ success: true, message: 'Extraction started' });
 
       // Since we support both /lstng and /sl/list pages now, we can simplify the extraction
       chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: async () => {
+        func: async (isFromKeyboardShortcut) => {
           console.log('🚀 Running eBay.com listing form extraction script');
 
           // Load settings
@@ -245,11 +253,109 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const extractedData = extractEbayListingFormData();
           console.log('📦 Extracted eBay.com listing form data:', extractedData);
           
-          // Send back to popup
-          chrome.runtime.sendMessage({ action: "extractedEbayComData", payload: extractedData });
-        }
+          // Convert extracted eBay.com data to bridged JSON format
+          const bridgedJson = {
+            source: "EBAY_US_CA_BRIDGE",
+            templateType: extractedData.templateType || "jeans",
+            title: extractedData.title || "",
+            sku: extractedData.sku || "",
+            priceCAD: extractedData.priceCAD || "",
+            priceUSD: extractedData.priceUSD || "",
+            brand: extractedData.brand || "",
+            size: extractedData.size || "",
+            inseam: extractedData.inseam || "",
+            waistSize: extractedData.waistSize || "",
+            color: extractedData.color || "",
+            wash: extractedData.wash || "",
+            rise: extractedData.rise || "",
+            style: extractedData.style || "",
+            fit: extractedData.fit || "",
+            type: extractedData.type || "",
+            material: extractedData.material || [],
+            sleeveLength: extractedData.sleeveLength || "",
+            neckline: extractedData.neckline || "",
+            closure: extractedData.closure || "",
+            collarStyle: extractedData.collarStyle || "",
+            fabricType: extractedData.fabricType || "",
+            chestSize: extractedData.chestSize || "",
+            shirtLength: extractedData.shirtLength || "",
+            country: extractedData.country || "Unknown",
+            description: extractedData.description || "",
+            condition: extractedData.condition || "",
+            conditionDescription: extractedData.conditionDescription || "",
+            adRate: "6.0",
+            originalUrl: extractedData.originalUrl,
+            extractedAt: extractedData.extractedAt
+          };
+
+          // Save to storage for popup sync
+          chrome.storage.local.set({ latestEbayJson: bridgedJson }, () => {
+            console.log("✅ Bridged JSON saved to storage for popup sync");
+          });
+          
+          // Send back to popup with explicit UI update request
+          chrome.runtime.sendMessage({ 
+            action: "extractedEbayComData", 
+            payload: bridgedJson
+          });
+          
+          // If triggered by keyboard shortcut, send message to background for auto-bridging
+          if (isFromKeyboardShortcut) {
+            console.log('🚀 Keyboard shortcut detected - requesting auto-bridge...');
+            chrome.runtime.sendMessage({ 
+              action: "autoBridgeToEbayCA", 
+              payload: bridgedJson 
+            });
+          }
+        },
+        args: [isFromKeyboardShortcut] // Pass the parameter
       });
     });
+    
+    return true; // Will respond asynchronously
+  }
+
+  if (msg.action === 'autoBridgeToEbayCA') {
+    console.log('📩 Received autoBridgeToEbayCA trigger');
+    const bridgedJson = msg.payload;
+    
+    // Load settings to get template URL
+    fetch(chrome.runtime.getURL('settings.json'))
+      .then(response => response.json())
+      .then(settings => {
+        const templateType = bridgedJson.templateType || 'jeans';
+        const templateUrl = settings.templates.ebayCA.categories[templateType] || 
+                           settings.templates.ebayCA.defaultTemplate;
+        
+        console.log('🎯 Using template for', templateType, ':', templateUrl);
+        
+        // Create new tab with eBay.ca template
+        chrome.tabs.create({ url: templateUrl }, (newTab) => {
+          // Wait for tab to load, then fill the form
+          chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+            if (tabId === newTab.id && info.status === 'complete') {
+              chrome.tabs.onUpdated.removeListener(listener);
+              
+              // Inject content script and fill form
+              chrome.scripting.executeScript({
+                target: { tabId: newTab.id },
+                files: ['contentScript.js']
+              }, () => {
+                // Send the listing data to fill the form
+                chrome.tabs.sendMessage(newTab.id, { 
+                  action: 'fillForm', 
+                  data: bridgedJson 
+                });
+              });
+            }
+          });
+        });
+      })
+      .catch(error => {
+        console.error('❌ Failed to load settings for auto-bridge:', error);
+      });
+      
+    return true; // Will respond asynchronously
   }
 
   if (msg.action === 'createListing') {
@@ -299,4 +405,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     
     return true; // Will respond asynchronously
   }
+  
+  return true; // Keep message port open for async responses
 });

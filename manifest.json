@@ -11,7 +11,19 @@
   ],
   "host_permissions": [
     "https://*.ebay.com/*",
-    "https://*.ebay.ca/*"
+    "https://*.ebay.ca/*",
+    "https://*.chatgpt.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.ebay.com/*",
+        "https://*.ebay.ca/*",
+        "https://*.chatgpt.com/*"
+      ],
+      "js": ["contentScript.js"],
+      "run_at": "document_end"
+    }
   ],
   "action": {
     "default_popup": "popup.html",
