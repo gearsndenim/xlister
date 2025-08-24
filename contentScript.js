@@ -81,12 +81,47 @@ async function fillDropdown(buttonSelector, searchInputSelector, value) {
     
     // Look for dropdown menu within the button's container to avoid cross-field pollution
     const container = button.closest('.field') || button.closest('.form-field') || button.parentElement;
-    const dropdownMenu = container?.querySelector('.menu__items') || button.parentElement.querySelector('.menu__items');
-    const menuItems = Array.from(dropdownMenu?.querySelectorAll('span') || []);
-    const match = menuItems.find(item => item.innerText.trim().toLowerCase() === value.trim().toLowerCase());
+    
+    // First try standard menu items
+    let dropdownMenu = container?.querySelector('.menu__items') || button.parentElement.querySelector('.menu__items');
+    let menuItems = Array.from(dropdownMenu?.querySelectorAll('span') || []);
+    let match = menuItems.find(item => item.innerText.trim().toLowerCase() === value.trim().toLowerCase());
+    
+    // If not found, try filter menu items (used for Performance/Activity and similar fields)
+    if (!match) {
+        const filterMenuItems = Array.from(document.querySelectorAll('.filter-menu__item'));
+        console.log(`🔍 Found ${filterMenuItems.length} filter menu items, searching for: "${value}"`);
+        
+        match = filterMenuItems.find(item => {
+            const text = item.querySelector('.filter-menu__text');
+            const textContent = text?.textContent?.trim()?.toLowerCase();
+            const isMatch = textContent === value.trim().toLowerCase();
+            if (isMatch) {
+                console.log(`✅ Found exact match in filter menu for "${value}": ${textContent}`);
+            }
+            return isMatch;
+        });
+    }
     
     if (match) {
-        match.click();
+        // Check if it's a filter menu item that needs special handling
+        if (match.classList.contains('filter-menu__item')) {
+            const isChecked = match.getAttribute('aria-checked') === 'true';
+            if (!isChecked) {
+                console.log(`🎯 Selecting filter menu item "${value}"`);
+                match.click();
+                await new Promise(resolve => setTimeout(resolve, 150));
+                
+                // Close the dropdown after selection
+                document.body.click();
+                await new Promise(resolve => setTimeout(resolve, 300));
+            } else {
+                console.log(`✓ "${value}" already selected in filter menu`);
+            }
+        } else {
+            // Regular menu item
+            match.click();
+        }
         console.log(`✅ Selected "${value}" for ${buttonSelector}`);
     } else {
         input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
@@ -109,22 +144,37 @@ async function fillMultiSelect(buttonSelector, searchInputSelector, values) {
     
     // If not found, try to find input within the button's immediate area
     if (!input) {
-        // Look for the input that just appeared (likely the one we opened)
-        const potentialInputs = document.querySelectorAll('input[placeholder*="Search"], .filter-menu input[type="text"]');
-        
-        // Try to find the input that's visible and in the right context
-        for (const inp of potentialInputs) {
-            const inputRect = inp.getBoundingClientRect();
-            const buttonRect = button.getBoundingClientRect();
-            
-            // Check if the input is visible and near the button
-            if (inputRect.height > 0 && inputRect.width > 0) {
-                // Check if it's in a reasonable position relative to the button
-                const isNearButton = Math.abs(inputRect.top - buttonRect.bottom) < 200;
-                if (isNearButton) {
+        // First try to find the input within the button's container/parent
+        const container = button.closest('.field') || button.closest('.form-field') || button.parentElement;
+        if (container) {
+            const containerInputs = container.querySelectorAll('input[placeholder*="Search"], .filter-menu input[type="text"]');
+            for (const inp of containerInputs) {
+                if (inp.offsetParent !== null) { // Check if visible
                     input = inp;
-                    console.log(`📍 Found multi-select input near button: ${inp.placeholder || inp.name || 'unnamed'}`);
+                    console.log(`📍 Found multi-select input in container: ${inp.placeholder || inp.name || 'unnamed'}`);
                     break;
+                }
+            }
+        }
+        
+        // If still not found, look for the input that just appeared (likely the one we opened)
+        if (!input) {
+            const potentialInputs = document.querySelectorAll('input[placeholder*="Search"], .filter-menu input[type="text"]');
+            
+            // Try to find the input that's visible and in the right context
+            for (const inp of potentialInputs) {
+                const inputRect = inp.getBoundingClientRect();
+                const buttonRect = button.getBoundingClientRect();
+                
+                // Check if the input is visible and near the button
+                if (inputRect.height > 0 && inputRect.width > 0) {
+                    // Check if it's in a reasonable position relative to the button
+                    const isNearButton = Math.abs(inputRect.top - buttonRect.bottom) < 200;
+                    if (isNearButton) {
+                        input = inp;
+                        console.log(`📍 Found multi-select input near button: ${inp.placeholder || inp.name || 'unnamed'}`);
+                        break;
+                    }
                 }
             }
         }
@@ -138,11 +188,19 @@ async function fillMultiSelect(buttonSelector, searchInputSelector, values) {
     
     console.log(`✅ Using input for multi-select: ${input.placeholder || input.name || 'unnamed'}`);
     
-    // Verify this is the right input by checking it's not a brand/size/color input
+    // Verify this is the right input by checking it's not conflicting with expected field
     const inputName = (input.name || '').toLowerCase();
     const inputPlaceholder = (input.placeholder || '').toLowerCase();
-    if (inputName.includes('brand') || inputName.includes('size') || inputName.includes('color') ||
-        inputPlaceholder.includes('brand') || inputPlaceholder.includes('size') || inputPlaceholder.includes('color')) {
+    const expectedFieldType = buttonSelector.toLowerCase();
+    
+    // Only abort if we detect a conflicting field type (not the one we're trying to fill)
+    const isConflictingField = (
+        (inputName.includes('brand') && !expectedFieldType.includes('brand')) ||
+        (inputName.includes('size') && !expectedFieldType.includes('size')) ||
+        (inputName.includes('color') && !expectedFieldType.includes('color'))
+    );
+    
+    if (isConflictingField) {
         console.warn(`⚠️ Detected wrong input field (${inputName || inputPlaceholder}), aborting multi-select for ${buttonSelector}`);
         document.body.click();
         return;
@@ -1554,7 +1612,7 @@ async function fillFields(data) {
             'department': 'department',
             'model': 'model',
             'features': 'features',
-            'performance/activity': 'performance',
+            'performance/activity': 'performanceActivity',
             'lining': 'lining',
             'accents': 'accents',
             'sleeve': 'sleeve',
@@ -1970,57 +2028,53 @@ async function fillFields(data) {
         }
 
         // Check for country of manufacture - required field enforcement (at the end)
-        const hasCountryOfManufacture = data.countryRegionOfManufacture || 
-                                       data.countryOfManufacture || 
-                                       data['country/region of manufacture'] ||
-                                       data.country;
+        const countryValue = data.countryRegionOfManufacture || 
+                            data.countryOfManufacture || 
+                            data['country/region of manufacture'] ||
+                            data.country;
         
-        if (!hasCountryOfManufacture) {
-            console.warn('⚠️ No country of manufacture found in data - this is required information');
+        const hasValidCountryOfManufacture = countryValue && 
+                                           countryValue !== '' && 
+                                           countryValue.toLowerCase() !== 'unknown';
+        
+        if (!hasValidCountryOfManufacture) {
+            const missingReason = !countryValue ? 'missing' : 
+                                 countryValue.toLowerCase() === 'unknown' ? 'set to "Unknown"' : 'invalid';
+            
+            console.warn(`⚠️ Country of manufacture is ${missingReason} - this is required information`);
             
             // Remove loading overlay first
             removeLoadingOverlay();
             
-            // Show warning dialog that requires acknowledgment
-            const userConfirmed = confirm(
-                '⚠️ WARNING: Country of Manufacture Missing!\n\n' +
+            // Find and focus on the country field
+            const countryButton = document.querySelector('button[name="attributes.Country/Region of Manufacture"]');
+            if (countryButton) {
+                countryButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                countryButton.focus();
+                countryButton.style.border = '3px solid red';
+                countryButton.style.backgroundColor = '#ffe6e6';
+                setTimeout(() => {
+                    countryButton.style.border = '';
+                    countryButton.style.backgroundColor = '';
+                }, 5000);
+                console.warn('🎯 Country field focused for user attention');
+            }
+            
+            // Show warning dialog
+            alert(
+                `⚠️ WARNING: Country of Manufacture ${missingReason.charAt(0).toUpperCase() + missingReason.slice(1)}!\n\n` +
                 'This is a key piece of information required for eBay listings.\n' +
                 'You will need to manually fill this field before publishing.\n\n' +
-                'Click OK to continue and focus on the images panel,\n' +
-                'or Cancel to stop the auto-fill process.'
+                'The Country field has been highlighted for your attention.'
             );
-            
-            if (!userConfirmed) {
-                console.warn('❌ User cancelled auto-fill due to missing country of manufacture');
-                isCurrentlyFilling = false;
-                return;
-            }
         } else {
-            // Remove loading overlay if country of manufacture is present
+            // Remove loading overlay if country of manufacture is valid
             removeLoadingOverlay();
-        }
-        
-        // Focus on the images panel (div class=uploader-ui)
-        const imagesPanel = document.querySelector('div.uploader-ui, .uploader-ui, [data-testid="uploader-ui"], .photo-upload, .image-upload');
-        if (imagesPanel) {
-            console.warn('📸 Focusing on images panel for user attention');
-            imagesPanel.focus();
-            imagesPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
             
-            // Add a subtle highlight to draw attention to the images area
-            const originalBorder = imagesPanel.style.border;
-            imagesPanel.style.border = '3px solid #ff6b35';
-            imagesPanel.style.transition = 'border 0.3s ease';
-            
-            // Remove highlight after 3 seconds
-            setTimeout(() => {
-                imagesPanel.style.border = originalBorder;
-            }, 3000);
-        } else {
-            console.warn('⚠️ Could not find images panel to focus on');
-            // Fallback to title input if images panel not found
+            // Focus on title when everything goes well
             const titleInputFinal = document.querySelector('input[name="title"]');
             if (titleInputFinal) {
+                console.log('✅ All fields completed successfully - focusing on title');
                 titleInputFinal.focus();
                 titleInputFinal.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
