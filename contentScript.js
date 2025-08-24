@@ -400,9 +400,38 @@ function calculateCategoryMatchScore(labelText, targetCategory, targetPath, cate
     } else if (labelLower.includes(targetLower)) {
         score += 80;
         reasons.push('partial category name match');
+        
+        // CRITICAL: Check for subcategory mismatch (tops vs shorts, etc.)
+        const targetWords = targetLower.split(' ');
+        const labelWords = labelLower.split(' ');
+        
+        for (const targetWord of targetWords) {
+            if (targetWord === 'tops' && labelWords.includes('shorts')) {
+                score -= 2000; // MASSIVE penalty for tops vs shorts mismatch
+                reasons.push('SUBCATEGORY MISMATCH (tops vs shorts) - MASSIVE PENALTY');
+                console.warn(`🚫 SUBCATEGORY MISMATCH: Target needs "tops" but found "shorts": ${labelText}`);
+                break;
+            } else if (targetWord === 'shorts' && labelWords.includes('tops')) {
+                score -= 2000; // MASSIVE penalty for shorts vs tops mismatch
+                reasons.push('SUBCATEGORY MISMATCH (shorts vs tops) - MASSIVE PENALTY');
+                console.warn(`🚫 SUBCATEGORY MISMATCH: Target needs "shorts" but found "tops": ${labelText}`);
+                break;
+            }
+        }
     } else if (targetLower.includes(labelLower)) {
         score += 60;
         reasons.push('category name contains match');
+    }
+    
+    // SPECIAL BONUS: Perfect gender + category match
+    const departmentFromData = (categoryInfo?.department || window.currentListingData?.department || '').toLowerCase();
+    if (departmentFromData && labelLower.includes(targetLower)) {
+        if ((departmentFromData === 'men' && labelLower.includes('men')) ||
+            (departmentFromData === 'women' && labelLower.includes('women'))) {
+            score += 1000; // Huge bonus for correct gender + category combination
+            reasons.push('PERFECT GENDER + CATEGORY MATCH - HUGE BONUS');
+            console.log(`✅ PERFECT MATCH: ${departmentFromData} + ${targetCategory} = ${labelText}`);
+        }
     }
     
     // 2. Gender/department matching (very important for disambiguation)
@@ -1091,107 +1120,139 @@ async function fillFields(data) {
             // Wait a moment for the category dialog to load
             await new Promise(resolve => setTimeout(resolve, 500)); // Reduced from 2000ms to 500ms
             
-            // First, try to find clickable category elements directly
+            // First, try to find exact category match
             const clickableElements = document.querySelectorAll('button, a, [role="button"], [role="option"], li, label');
-            let foundShorts = false;
+            console.log(`🔍 Searching for category: "${targetCategory}" among ${clickableElements.length} elements`);
             
+            // Try exact match first
             for (const element of clickableElements) {
                 const text = element.textContent.trim();
-                if (text.toLowerCase().includes('short') && text.length < 50) {
-                    
-                    // Try clicking it
+                if (text === targetCategory) {
+                    console.log(`✅ Found exact match for "${targetCategory}": "${text}"`);
                     try {
                         element.click();
-                        foundShorts = true;
-                        await new Promise(resolve => setTimeout(resolve, 400)); // Reduced from 1000ms to 400ms
+                        await new Promise(resolve => setTimeout(resolve, 400)); 
                         return await confirmCategorySelection();
                     } catch (error) {
-                        console.warn(`❌ Failed to click element: ${error.message}`);
+                        console.warn(`❌ Failed to click exact match: ${error.message}`);
                     }
                 }
             }
             
-            if (!foundShorts) {
-                // Let's try to find the category selection dialog specifically
-                const categorySelectors = [
-                    '.category-picker-dialog',
-                    '.category-selection-dialog',
-                    '[data-testid*="category"]',
-                    '.modal-dialog',
-                    '.dropdown-menu',
-                    '.category-dropdown',
-                    'div[role="dialog"]',
-                    'div[role="listbox"]'
-                ];
+            // Try partial match with validation
+            for (const element of clickableElements) {
+                const text = element.textContent.trim();
+                const textLower = text.toLowerCase();
+                const targetLower = targetCategory.toLowerCase();
                 
-                let categoryContainer = null;
-                for (const selector of categorySelectors) {
-                    categoryContainer = document.querySelector(selector);
-                    if (categoryContainer && categoryContainer.offsetHeight > 0) {
-                        break;
+                if (textLower.includes(targetLower) && text.length < 100) {
+                    // Validate that this is not a wrong subcategory match
+                    if (targetLower.includes('tops') && textLower.includes('shorts')) {
+                        console.warn(`❌ Skipping wrong subcategory: "${text}" (target needs tops, not shorts)`);
+                        continue;
+                    }
+                    if (targetLower.includes('shorts') && textLower.includes('tops')) {
+                        console.warn(`❌ Skipping wrong subcategory: "${text}" (target needs shorts, not tops)`);
+                        continue;
+                    }
+                    
+                    console.log(`✅ Found partial match for "${targetCategory}": "${text}"`);
+                    try {
+                        element.click();
+                        await new Promise(resolve => setTimeout(resolve, 400));
+                        return await confirmCategorySelection();
+                    } catch (error) {
+                        console.warn(`❌ Failed to click partial match: ${error.message}`);
                     }
                 }
+            }
+            
+            // If no direct match found, try to find the category selection dialog specifically
+            const categorySelectors = [
+                '.category-picker-dialog',
+                '.category-selection-dialog',
+                '[data-testid*="category"]',
+                '.modal-dialog',
+                '.dropdown-menu',
+                '.category-dropdown',
+                'div[role="dialog"]',
+                'div[role="listbox"]'
+            ];
+            
+            let categoryContainer = null;
+            for (const selector of categorySelectors) {
+                categoryContainer = document.querySelector(selector);
+                if (categoryContainer && categoryContainer.offsetHeight > 0) {
+                    break;
+                }
+            }
+            
+            if (categoryContainer) {
+                const containerElements = categoryContainer.querySelectorAll('button, a, [role="button"], [role="option"], li, label, span, div');
                 
-                if (categoryContainer) {
-                    const containerElements = categoryContainer.querySelectorAll('button, a, [role="button"], [role="option"], li, label, span, div');
-                    
-                    // First, check if we're in a subcategory and need to navigate up
-                    const currentPath = Array.from(containerElements).find(el => 
-                        el.textContent.includes('Selected') && el.textContent.includes('>')
-                    );
-                    
-                    if (currentPath) {
-                        // If we're in Jeans, we need to go up to Men's Clothing
-                        if (currentPath.textContent.includes('Jeans')) {
+                // First, check if we're in a subcategory and need to navigate up
+                const currentPath = Array.from(containerElements).find(el => 
+                    el.textContent.includes('Selected') && el.textContent.includes('>')
+                );
+                
+                if (currentPath) {
+                    // If we're in Jeans, we need to go up to Men's Clothing
+                    if (currentPath.textContent.includes('Jeans')) {
+                        
+                        // Look for "Men's Clothing" button to go back
+                        const mensClothingButton = Array.from(containerElements).find(el => 
+                            el.textContent.toLowerCase().includes("men's clothing") ||
+                            el.textContent.toLowerCase().includes("mens clothing")
+                        );
+                        
+                        if (mensClothingButton) {
+                            mensClothingButton.click();
                             
-                            // Look for "Men's Clothing" button to go back
-                            const mensClothingButton = Array.from(containerElements).find(el => 
-                                el.textContent.toLowerCase().includes("men's clothing") ||
-                                el.textContent.toLowerCase().includes("mens clothing")
-                            );
+                            // Wait for navigation and search again
+                            await new Promise(resolve => setTimeout(resolve, 1500));
                             
-                            if (mensClothingButton) {
-                                mensClothingButton.click();
-                                
-                                // Wait for navigation and search again
-                                await new Promise(resolve => setTimeout(resolve, 1500));
-                                
-                                // Now search for Shorts in the new view
-                                const updatedElements = categoryContainer.querySelectorAll('button, a, [role="button"], [role="option"], li, label, span, div');
-                                
-                                for (const element of updatedElements) {
-                                    const text = element.textContent.trim().toLowerCase();
-                                    if (text === 'shorts' || text.includes('short') && text.length < 30) {
-                                        try {
-                                            element.click();
-                                            foundShorts = true;
-                                            await new Promise(resolve => setTimeout(resolve, 1000));
-                                            return await confirmCategorySelection();
-                                        } catch (error) {
-                                            console.warn(`❌ Failed to click shorts: ${error.message}`);
-                                        }
+                            // Now search for target category in the new view
+                            const updatedElements = categoryContainer.querySelectorAll('button, a, [role="button"], [role="option"], li, label, span, div');
+                            
+                            for (const element of updatedElements) {
+                                const text = element.textContent.trim();
+                                if (text === targetCategory || (text.toLowerCase().includes(targetCategory.toLowerCase()) && text.length < 50)) {
+                                    try {
+                                        element.click();
+                                        await new Promise(resolve => setTimeout(resolve, 1000));
+                                        return await confirmCategorySelection();
+                                    } catch (error) {
+                                        console.warn(`❌ Failed to click category: ${error.message}`);
                                     }
                                 }
                             }
                         }
                     }
-                    
-                    // If we didn't find shorts through navigation, try clicking any shorts element
-                    if (!foundShorts) {
-                        for (let i = 0; i < Math.min(20, containerElements.length); i++) {
-                            const element = containerElements[i];
-                            const text = element.textContent.trim();
-                            if (text.length > 0 && text.length < 100) {
-                                if (text.toLowerCase().includes('short')) {
-                                    try {
-                                        element.click();
-                                        foundShorts = true;
-                                        await new Promise(resolve => setTimeout(resolve, 1000));
-                                        return await confirmCategorySelection();
-                                    } catch (error) {
-                                        // Continue to next element
-                                    }
-                                }
+                }
+                
+                // If we didn't find through navigation, try clicking any matching element
+                for (let i = 0; i < Math.min(20, containerElements.length); i++) {
+                    const element = containerElements[i];
+                    const text = element.textContent.trim();
+                    if (text.length > 0 && text.length < 100) {
+                        const textLower = text.toLowerCase();
+                        const targetLower = targetCategory.toLowerCase();
+                        
+                        if (textLower.includes(targetLower)) {
+                            // Apply same validation as before
+                            if (targetLower.includes('tops') && textLower.includes('shorts')) {
+                                continue; // Skip wrong subcategory
+                            }
+                            if (targetLower.includes('shorts') && textLower.includes('tops')) {
+                                continue; // Skip wrong subcategory
+                            }
+                            
+                            try {
+                                element.click();
+                                await new Promise(resolve => setTimeout(resolve, 1000));
+                                return await confirmCategorySelection();
+                            } catch (error) {
+                                // Continue to next element
                             }
                         }
                     }
@@ -1206,6 +1267,10 @@ async function fillFields(data) {
             // Get the full category info from data
             const categoryInfo = window.currentListingData?.categoryInfo || {};
             const targetPath = categoryInfo.fullPath || categoryInfo.pathArray?.join(' > ') || '';
+            const department = window.currentListingData?.department?.toLowerCase() || '';
+            
+            console.log(`🔍 Searching for category: "${targetCategory}" with department: "${department}"`);
+            console.log(`📍 Target path: "${targetPath}"`);
             
             // Look for the search box in the category dialog
             const searchBoxSelectors = [
@@ -1236,13 +1301,34 @@ async function fillFields(data) {
             // Small delay to ensure search box is ready
             await new Promise(resolve => setTimeout(resolve, 100));
             
-            // Handle "&" character issue - if category contains "&", search only the first word
-            let searchTerm = targetCategory;
-            if (targetCategory.includes('&')) {
-                // Extract first word before "&" for search
-                searchTerm = targetCategory.split('&')[0].trim();
-                console.warn(`⚠️ Category contains "&" - searching for "${searchTerm}" instead of full "${targetCategory}"`);
+            // Try different search strategies for gender-specific categories
+            const searchStrategies = [];
+            
+            // Strategy 1: Try with department prefix if we know the department
+            if (department && (department === 'men' || department === 'women')) {
+                searchStrategies.push(`${department}'s ${targetCategory}`);
+                searchStrategies.push(`${department} ${targetCategory}`);
             }
+            
+            // Strategy 2: Original target category
+            searchStrategies.push(targetCategory);
+            
+            // Strategy 3: Just the last word(s) if it's a compound category
+            if (targetCategory.includes(' ')) {
+                const lastWords = targetCategory.split(' ').slice(-1).join(' '); // Get last word
+                searchStrategies.push(lastWords);
+            }
+            
+            // Handle "&" character issue - if category contains "&", search only the first word
+            let searchTerm = searchStrategies[0];
+            if (searchTerm.includes('&')) {
+                // Extract first word before "&" for search
+                searchTerm = searchTerm.split('&')[0].trim();
+                console.warn(`⚠️ Search term contains "&" - using "${searchTerm}" instead`);
+            }
+            
+            console.log(`🔍 Search strategies: ${JSON.stringify(searchStrategies)}`);
+            console.log(`🎯 Starting with search term: "${searchTerm}"`);
             
             // Method 1: Type character by character with events
             for (let i = 0; i < searchTerm.length; i++) {
@@ -1407,7 +1493,44 @@ async function fillFields(data) {
             console.warn(`   Reason: ${bestMatch.reason}`);
             console.warn(`   Department: ${window.currentListingData?.department || 'none'}`);
             
+            // CRITICAL VALIDATION: Check for subcategory mismatch before selection
+            const selectedLower = bestMatch.labelText.toLowerCase();
+            const targetLower = targetCategory.toLowerCase();
+            
+            // Block selection if it's a critical subcategory mismatch
+            if (targetLower.includes('tops') && selectedLower.includes('shorts')) {
+                console.error(`🚫 BLOCKING SELECTION: Target is "${targetCategory}" but selected "${bestMatch.labelText}"`);
+                console.error(`🚫 This is a CRITICAL MISMATCH (tops vs shorts) - aborting selection`);
+                
+                // Close any popups and return false
+                const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true });
+                document.dispatchEvent(escapeEvent);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                document.body.click();
+                
+                return false;
+            }
+            
+            if (targetLower.includes('shorts') && selectedLower.includes('tops')) {
+                console.error(`🚫 BLOCKING SELECTION: Target is "${targetCategory}" but selected "${bestMatch.labelText}"`);
+                console.error(`🚫 This is a CRITICAL MISMATCH (shorts vs tops) - aborting selection`);
+                
+                // Close any popups and return false
+                const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true });
+                document.dispatchEvent(escapeEvent);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                document.body.click();
+                
+                return false;
+            }
+            
+            // If we get here, the selection is acceptable - proceed with clicking
+            console.log(`✅ Selection validated - proceeding with: "${bestMatch.labelText}"`);
+            
             // Click the radio button
+            targetResult.checked = true; // Set as checked
+            targetResult.click(); // Also trigger click event
+            targetResult.dispatchEvent(new Event('change', { bubbles: true })); // Trigger change event
             targetResult.checked = true; // Set as checked
             targetResult.click(); // Also trigger click event
             targetResult.dispatchEvent(new Event('change', { bubbles: true })); // Trigger change event
@@ -1431,6 +1554,26 @@ async function fillFields(data) {
             
             if (!doneButtonFound) {
                 console.warn('⚠️ No Done button found, but selection was made');
+                
+                // Try to close popup using escape key and other methods
+                const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true });
+                document.dispatchEvent(escapeEvent);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Click outside the popup to close it
+                document.body.click();
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Look for any close buttons or X buttons
+                const closeButtons = document.querySelectorAll(
+                    'button[aria-label*="close"], button[aria-label*="Close"], ' +
+                    '.close, .modal-close, [role="button"][aria-label*="close"]'
+                );
+                
+                for (const closeButton of closeButtons) {
+                    closeButton.click();
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                }
             }
             
             return true;
@@ -2263,11 +2406,7 @@ async function fillFields(data) {
             // Trigger verification immediately after overlay closes
             console.log('🔍 Starting form verification...');
             // Remove any extra eBay spinners that might appear
-            const extraSpinners = document.querySelectorAll('.page-mask__spinner-wrap');
-            extraSpinners.forEach(spinner => {
-                console.log('🧹 Removing extra eBay spinner');
-                spinner.remove();
-            });
+            removeEbaySpinners();
             
             performFormVerification(data);
             
@@ -2292,6 +2431,9 @@ async function fillFields(data) {
 }
 
 function createLoadingOverlay() {
+    // Remove any existing eBay spinners before creating overlay
+    removeEbaySpinners();
+    
     const overlay = document.createElement('div');
     overlay.id = 'ebay-xlister-loading-overlay';
     overlay.style.cssText = `
@@ -2301,7 +2443,7 @@ function createLoadingOverlay() {
         width: 100%;
         height: 100%;
         background-color: rgba(0, 0, 0, 0.8);
-        z-index: 999999;
+        z-index: 9999999;
         display: flex;
         justify-content: center;
         align-items: center;
@@ -2352,6 +2494,15 @@ function createLoadingOverlay() {
     messageBox.appendChild(message);
     overlay.appendChild(messageBox);
     
+    // Set up periodic removal of eBay spinners that might appear on top
+    const spinnerRemovalInterval = setInterval(() => {
+        if (document.getElementById('ebay-xlister-loading-overlay')) {
+            removeEbaySpinners();
+        } else {
+            clearInterval(spinnerRemovalInterval);
+        }
+    }, 500); // Check every 500ms
+    
     return overlay;
 }
 
@@ -2367,6 +2518,30 @@ function removeLoadingOverlay() {
     if (overlay) {
         overlay.remove();
     }
+    
+    // Also remove any eBay spinners that might have appeared
+    removeEbaySpinners();
+}
+
+// Helper function to remove eBay's own spinners that can interfere with our overlay
+function removeEbaySpinners() {
+    const spinnerSelectors = [
+        '.page-mask__spinner-wrap',
+        '.page-mask__spinner',
+        '.spinner-wrap',
+        '[aria-label="Busy"]',
+        '.progress-spinner'
+    ];
+    
+    spinnerSelectors.forEach(selector => {
+        const spinners = document.querySelectorAll(selector);
+        spinners.forEach(spinner => {
+            if (spinner && spinner.parentNode) {
+                console.log('🧹 Removing eBay spinner:', selector);
+                spinner.remove();
+            }
+        });
+    });
 }
 
 async function handlePackageWeight(data) {
@@ -2999,6 +3174,114 @@ async function verifyAndFixBrandField(expectedBrand) {
 // 5. More intelligent difference detection (skip minor issues, focus on important fields)
 // 6. Automatic correction of missing closure, country, brand, and multi-select fields
 
+// Helper function for category auto-fixing
+async function selectCategoryFunc(targetCategory) {
+    try {
+        console.log(`🔍 Attempting to select category: ${targetCategory}`);
+        
+        // First, try to find the category button and click it
+        const categoryButton = document.querySelector('button[name="categoryId"]') ||
+                             document.querySelector('button[data-testid="category-field-trigger"]') ||
+                             document.querySelector('.category-picker__trigger') ||
+                             document.querySelector('[data-testid="category"]') ||
+                             document.querySelector('.category-field button') ||
+                             document.querySelector('button[aria-label*="category"]');
+        
+        if (!categoryButton) {
+            console.warn('⚠️ Category button not found');
+            return false;
+        }
+        
+        // Click to open category selection
+        categoryButton.click();
+        await new Promise(resolve => setTimeout(resolve, 800));
+        
+        // Look for category options in the dropdown/modal
+        const categoryOptions = document.querySelectorAll(
+            'a, button, li, [role="option"], [role="button"], .clickable, .selectable'
+        );
+        
+        // Try exact match first
+        for (const option of categoryOptions) {
+            const text = option.textContent.trim();
+            if (text === targetCategory) {
+                console.log('✅ Found exact category match:', targetCategory);
+                option.click();
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Close any remaining popups/modals
+                const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true });
+                document.dispatchEvent(escapeEvent);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                return true;
+            }
+        }
+        
+        // Try partial match - but be more specific for exact word matches
+        for (const option of categoryOptions) {
+            const text = option.textContent.trim();
+            const textLower = text.toLowerCase();
+            const targetLower = targetCategory.toLowerCase();
+            
+            // For "Activewear Tops" vs "Activewear Shorts", ensure we match the exact end word
+            if (textLower.includes(targetLower) && text.length < targetCategory.length + 30) {
+                // Extra validation: if target ends with "tops", don't match "shorts"
+                if (targetLower.endsWith('tops') && textLower.endsWith('shorts')) {
+                    console.log('❌ Skipping wrong match:', text, '(target needs "tops" not "shorts")');
+                    continue;
+                }
+                if (targetLower.endsWith('shorts') && textLower.endsWith('tops')) {
+                    console.log('❌ Skipping wrong match:', text, '(target needs "shorts" not "tops")');
+                    continue;
+                }
+                
+                console.log('✅ Found partial category match:', targetCategory, '→', text);
+                option.click();
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Close any remaining popups/modals
+                const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true });
+                document.dispatchEvent(escapeEvent);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                return true;
+            }
+        }
+        
+        console.warn(`⚠️ Could not find category option for: ${targetCategory}`);
+        
+        // Clean up any open popups/modals before returning
+        const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true });
+        document.dispatchEvent(escapeEvent);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Click outside to close any remaining popups
+        document.body.click();
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        return false;
+        
+    } catch (error) {
+        console.error('❌ Error in selectCategoryFunc:', error);
+        
+        // Clean up any open popups/modals before returning
+        try {
+            const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true });
+            document.dispatchEvent(escapeEvent);
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Click outside to close any remaining popups
+            document.body.click();
+            await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (cleanupError) {
+            console.warn('⚠️ Error during popup cleanup:', cleanupError);
+        }
+        
+        return false;
+    }
+}
+
 // Auto-fix function to handle common verification issues
 async function attemptAutoFix(differences, originalData, extractedData) {
     const remainingDifferences = [];
@@ -3063,6 +3346,64 @@ async function attemptAutoFix(differences, originalData, extractedData) {
             }
         }
         
+        // Auto-fix category field if there's a mismatch
+        else if (fieldName === 'category' && originalData.category && diff.includes('Value mismatch')) {
+            console.log(`🔧 Auto-fixing category field: ${originalData.category}`);
+            try {
+                // Remove any existing highlight first
+                const categoryButton = document.querySelector('button[name="categoryId"]');
+                if (categoryButton) {
+                    // Remove any highlighting from previous operations
+                    categoryButton.classList.remove('ebay-xlister-mismatch');
+                    const container = categoryButton.closest('.field') || 
+                                    categoryButton.closest('.form-field') || 
+                                    categoryButton.closest('.input-group') ||
+                                    categoryButton.closest('.field-group') ||
+                                    categoryButton.parentElement;
+                    if (container) {
+                        container.classList.remove('ebay-xlister-mismatch');
+                    }
+                }
+                
+                // Attempt to select the correct category
+                const categorySelected = await selectCategoryFunc(originalData.category);
+                
+                if (categorySelected) {
+                    // Ensure category popup is closed after selection
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    // Force close any open category modals/dropdowns
+                    const categoryModals = document.querySelectorAll('.modal, .dialog, .popup, .overlay, .category-selection, .category-picker');
+                    categoryModals.forEach(modal => {
+                        if (modal.style.display !== 'none' && modal.offsetParent !== null) {
+                            console.log('🔄 Closing category modal after auto-fix');
+                            modal.style.display = 'none';
+                            modal.remove();
+                        }
+                    });
+                    
+                    // Also try clicking outside to close any remaining dropdowns
+                    document.body.click();
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    
+                    // Press Escape key to close any remaining popups
+                    document.dispatchEvent(new KeyboardEvent('keydown', {
+                        key: 'Escape',
+                        keyCode: 27,
+                        bubbles: true
+                    }));
+                    
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    fixed = true;
+                    console.log('✅ Category field auto-fixed and popup closed');
+                } else {
+                    console.warn('⚠️ Failed to auto-select category');
+                }
+            } catch (error) {
+                console.warn('⚠️ Failed to auto-fix category field:', error);
+            }
+        }
+        
         // Auto-fix multi-select fields that appear empty
         else if (diff.includes('Multi-select field appears empty')) {
             const multiSelectFields = {
@@ -3117,11 +3458,82 @@ async function attemptAutoFix(differences, originalData, extractedData) {
         
         // Small delay between fixes
         if (fixed) {
+            // Remove highlight from successfully fixed field
+            await removeHighlightFromField(fieldName);
             await new Promise(resolve => setTimeout(resolve, 500));
         }
     }
     
     return remainingDifferences;
+}
+
+// Helper function to remove highlights from auto-fixed fields
+async function removeHighlightFromField(fieldName) {
+    try {
+        // Field to selector mappings (same as in highlightMismatchedFields)
+        const fieldSelectors = {
+            'title': 'input[name="title"]',
+            'sku': 'input[name="customLabel"]',
+            'priceCAD': 'input[name="price"]',
+            'description': 'iframe[id*="se-rte-frame"], textarea[name="description"]',
+            'condition': 'input[name="condition"]:checked',
+            'conditionDescription': 'textarea[name="itemConditionDescription"]',
+            'category': 'button[name="categoryId"]',
+            'storeCategory': 'button[name="primaryStoreCategoryId"], button[name="storeCategoryId"]',
+            'brand': 'button[name="attributes.Brand"]',
+            'size': 'button[name="attributes.Size"]',
+            'color': 'button[name="attributes.Color"]',
+            'style': 'button[name="attributes.Style"]',
+            'type': 'button[name="attributes.Type"]',
+            'material': 'button[name="attributes.Material"]',
+            'pattern': 'button[name="attributes.Pattern"]',
+            'department': 'button[name="attributes.Department"]',
+            'theme': 'button[name="attributes.Theme"]',
+            'features': 'button[name="attributes.Features"]',
+            'accents': 'button[name="attributes.Accents"]',
+            'closure': 'button[name="attributes.Closure"]',
+            'fabricType': 'button[name="attributes.Fabric Type"]',
+            'countryRegionOfManufacture': 'button[name="attributes.Country/Region of Manufacture"]',
+            'model': 'button[name="attributes.Model"]',
+            'productLine': 'button[name="attributes.Product Line"]',
+            'performanceActivity': 'button[name="attributes.Performance/Activity"]',
+            'occasion': 'button[name="attributes.Occasion"]',
+            'liningMaterial': 'button[name="attributes.Lining Material"]',
+            'outerShellMaterial': 'button[name="attributes.Outer Shell Material"]'
+        };
+        
+        const selector = fieldSelectors[fieldName];
+        if (!selector) {
+            return;
+        }
+        
+        // Handle multiple selectors separated by comma
+        const selectors = selector.split(',').map(s => s.trim());
+        
+        for (const sel of selectors) {
+            const element = document.querySelector(sel);
+            if (element) {
+                // Remove highlight from the element itself
+                element.classList.remove('ebay-xlister-mismatch');
+                
+                // Also remove highlight from parent containers
+                const container = element.closest('.field') || 
+                                element.closest('.form-field') || 
+                                element.closest('.input-group') ||
+                                element.closest('.field-group') ||
+                                element.parentElement;
+                
+                if (container) {
+                    container.classList.remove('ebay-xlister-mismatch');
+                }
+                
+                console.log(`🧹 Removed highlight from auto-fixed field: ${fieldName}`);
+                break;
+            }
+        }
+    } catch (error) {
+        console.warn(`⚠️ Error removing highlight from field ${fieldName}:`, error);
+    }
 }
 
 // Form verification function to extract current form values and compare with original JSON
@@ -3421,11 +3833,40 @@ function compareFormData(original, extracted) {
                 }
             }
             
+            // Special handling for condition description - more forgiving comparison
+            let isConditionDescMatch = false;
+            if (originalField === 'conditionDescription') {
+                // Remove common formatting differences and normalize text
+                const normalizeConditionText = (text) => {
+                    return text.toLowerCase()
+                              .replace(/\s+/g, ' ')      // Multiple spaces to single space
+                              .replace(/[^\w\s]/g, ' ')  // Remove special characters
+                              .replace(/\s+/g, ' ')      // Clean up multiple spaces again
+                              .trim();
+                };
+                
+                const normalizedOriginal = normalizeConditionText(originalValue);
+                const normalizedExtracted = normalizeConditionText(extractedValue);
+                
+                // Check if they match after normalization or if one contains the other
+                isConditionDescMatch = normalizedOriginal === normalizedExtracted ||
+                                     normalizedOriginal.includes(normalizedExtracted) ||
+                                     normalizedExtracted.includes(normalizedOriginal) ||
+                                     // Also check if the core content is similar (80% match)
+                                     (normalizedOriginal.length > 10 && normalizedExtracted.length > 10 && 
+                                      (normalizedOriginal.includes(normalizedExtracted.substring(0, Math.min(normalizedExtracted.length, 20))) ||
+                                       normalizedExtracted.includes(normalizedOriginal.substring(0, Math.min(normalizedOriginal.length, 20)))));
+                
+                if (isConditionDescMatch) {
+                    console.log(`✅ Condition description match found: "${originalValue}" → "${extractedValue}"`);
+                }
+            }
+            
             // Special handling for category names with & character
             const normalizedOriginal = originalLower.replace(/&/g, 'and').replace(/\s+/g, ' ');
             const normalizedExtracted = extractedLower.replace(/&/g, 'and').replace(/\s+/g, ' ');
             
-            if (!isCountryMatch && 
+            if (!isCountryMatch && !isConditionDescMatch && 
                 normalizedOriginal !== normalizedExtracted && 
                 !normalizedOriginal.includes(normalizedExtracted) && 
                 !normalizedExtracted.includes(normalizedOriginal)) {
