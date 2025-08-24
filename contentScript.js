@@ -305,21 +305,23 @@ function calculateCategoryMatchScore(labelText, targetCategory, targetPath, cate
             // This is a men's item
             console.log(`♂️ Detected men's item from path`);
             if (labelLower.includes('men') && !labelLower.includes('women')) {
-                score += 50;
+                score += 200; // Strong bonus for correct gender
                 reasons.push('men\'s category match');
             } else if (labelLower.includes('women') || labelLower.includes('ladies')) {
-                score -= 50; // Penalty for wrong gender
-                reasons.push('wrong gender (women vs men)');
+                score -= 1000; // Very strong penalty for wrong gender
+                reasons.push('wrong gender (women vs men) - MAJOR PENALTY');
+                console.warn(`🚫 GENDER MISMATCH: Target is men's but found women's category: ${labelText}`);
             }
         } else if (targetPathLower.includes('women') || targetPathLower.includes('ladies')) {
             // This is a women's item
             console.log(`♀️ Detected women's item from path`);
             if (labelLower.includes('women') || labelLower.includes('ladies')) {
-                score += 50;
+                score += 200; // Strong bonus for correct gender
                 reasons.push('women\'s category match');
             } else if (labelLower.includes('men') && !labelLower.includes('women')) {
-                score -= 50; // Penalty for wrong gender
-                reasons.push('wrong gender (men vs women)');
+                score -= 1000; // Very strong penalty for wrong gender
+                reasons.push('wrong gender (men vs women) - MAJOR PENALTY');
+                console.warn(`🚫 GENDER MISMATCH: Target is women's but found men's category: ${labelText}`);
             }
         } else {
             console.log(`⚪ No clear gender detected in path`);
@@ -341,20 +343,50 @@ function calculateCategoryMatchScore(labelText, targetCategory, targetPath, cate
         if (categoryData.includes('women') || categoryData.includes('ladies')) {
             console.log(`♀️ Detected women's item from categoryInfo`);
             if (labelLower.includes('women') || labelLower.includes('ladies')) {
-                score += 40;
+                score += 150; // Strong bonus for correct gender from info
                 reasons.push('women\'s category match (from info)');
             } else if (labelLower.includes('men') && !labelLower.includes('women')) {
-                score -= 40;
-                reasons.push('wrong gender from info (men vs women)');
+                score -= 800; // Strong penalty for wrong gender from info
+                reasons.push('wrong gender from info (men vs women) - MAJOR PENALTY');
+                console.warn(`🚫 GENDER MISMATCH (from info): Target is women's but found men's category: ${labelText}`);
             }
         } else if (categoryData.includes('men') && !categoryData.includes('women')) {
             console.log(`♂️ Detected men's item from categoryInfo`);
             if (labelLower.includes('men') && !labelLower.includes('women')) {
-                score += 40;
+                score += 150; // Strong bonus for correct gender from info
                 reasons.push('men\'s category match (from info)');
             } else if (labelLower.includes('women') || labelLower.includes('ladies')) {
-                score -= 40;
-                reasons.push('wrong gender from info (women vs men)');
+                score -= 800; // Strong penalty for wrong gender from info
+                reasons.push('wrong gender from info (women vs men) - MAJOR PENALTY');
+                console.warn(`🚫 GENDER MISMATCH (from info): Target is men's but found women's category: ${labelText}`);
+            }
+        }
+    }
+    
+    // Check department field directly from listing data for even stronger gender enforcement
+    const listingData = window.currentListingData;
+    if (listingData && listingData.department) {
+        const department = listingData.department.toLowerCase();
+        console.log(`👔 Department check: department="${department}"`);
+        if (department === 'men') {
+            if (labelLower.includes('men') && !labelLower.includes('women')) {
+                score += 300; // Very strong bonus for correct department match
+                reasons.push('department match (men)');
+                console.log(`✅ DEPARTMENT MATCH: Men's department matches men's category: ${labelText}`);
+            } else if (labelLower.includes('women') || labelLower.includes('ladies')) {
+                score -= 1500; // MASSIVE penalty for wrong department
+                reasons.push('DEPARTMENT MISMATCH (women vs men) - MASSIVE PENALTY');
+                console.error(`🚫 DEPARTMENT MISMATCH: Men's item but found women's category: ${labelText}`);
+            }
+        } else if (department === 'women') {
+            if (labelLower.includes('women') || labelLower.includes('ladies')) {
+                score += 300; // Very strong bonus for correct department match
+                reasons.push('department match (women)');
+                console.log(`✅ DEPARTMENT MATCH: Women's department matches women's category: ${labelText}`);
+            } else if (labelLower.includes('men') && !labelLower.includes('women')) {
+                score -= 1500; // MASSIVE penalty for wrong department
+                reasons.push('DEPARTMENT MISMATCH (men vs women) - MASSIVE PENALTY');
+                console.error(`🚫 DEPARTMENT MISMATCH: Women's item but found men's category: ${labelText}`);
             }
         }
     }
@@ -1191,6 +1223,9 @@ async function fillFields(data) {
                     }
                     
                     console.warn(`📊 Score for "${labelText}": ${score.score} (${score.reason})`);
+                    console.warn(`🔍 Department from data: ${window.currentListingData?.department || 'none'}`);
+                    console.warn(`🔍 Label contains 'women': ${labelText.toLowerCase().includes('women')}`);
+                    console.warn(`🔍 Label contains 'men': ${labelText.toLowerCase().includes('men')}`);
                     
                     if (score.score > bestMatch.score) {
                         bestMatch = { score: score.score, element: element, reason: score.reason, labelText: labelText };
@@ -2074,6 +2109,18 @@ async function fillFields(data) {
             // Remove loading overlay if country of manufacture is valid
             removeLoadingOverlay();
             
+            // FINAL VERIFICATION: Extract current form values and compare with original JSON
+            // Trigger verification immediately after overlay closes
+            console.log('🔍 Starting form verification...');
+            // Remove any extra eBay spinners that might appear
+            const extraSpinners = document.querySelectorAll('.page-mask__spinner-wrap');
+            extraSpinners.forEach(spinner => {
+                console.log('🧹 Removing extra eBay spinner');
+                spinner.remove();
+            });
+            
+            performFormVerification(data);
+            
             // Focus on title when everything goes well
             const titleInputFinal = document.querySelector('input[name="title"]');
             if (titleInputFinal) {
@@ -2792,4 +2839,459 @@ async function verifyAndFixBrandField(expectedBrand) {
     } catch (error) {
         console.error('❌ Error during brand verification:', error);
     }
+}
+
+// Form verification function to extract current form values and compare with original JSON
+async function performFormVerification(originalData) {
+    try {
+        console.log('🔍 Extracting current form values for verification...');
+        
+        // Wait a brief moment for any final form updates to settle
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        const extractedData = await extractCurrentFormData();
+        const differences = compareFormData(originalData, extractedData);
+        
+        console.log('📋 Original JSON data:', originalData);
+        console.log('📋 Extracted form data:', extractedData);
+        
+        if (differences.length > 0) {
+            console.warn('⚠️ FORM VERIFICATION FAILED - Differences found:');
+            differences.forEach((diff, index) => {
+                console.warn(`${index + 1}. ${diff}`);
+            });
+            
+            // Highlight mismatched fields and focus on the first one
+            await highlightMismatchedFields(differences, originalData, extractedData);
+            
+        } else {
+            console.log('✅ FORM VERIFICATION PASSED - All values match!');
+        }
+        
+    } catch (error) {
+        console.error('❌ Error during form verification:', error);
+        alert('❌ Form verification failed due to error. Check console for details.');
+    }
+}
+
+// Extract current form data from eBay.ca page
+async function extractCurrentFormData() {
+    const extractedData = {};
+    
+    try {
+        // Extract basic fields
+        const titleInput = document.querySelector('input[name="title"]');
+        if (titleInput && titleInput.value) {
+            extractedData.title = titleInput.value.trim();
+        }
+        
+        const priceInput = document.querySelector('input[name="price"]');
+        if (priceInput && priceInput.value) {
+            extractedData.priceCAD = priceInput.value.trim();
+        }
+        
+        const skuInput = document.querySelector('input[name="customLabel"]');
+        if (skuInput && skuInput.value) {
+            extractedData.sku = skuInput.value.trim();
+        }
+        
+        // Extract description
+        let description = '';
+        const descriptionIframe = document.querySelector('iframe[id*="se-rte-frame"]');
+        if (descriptionIframe) {
+            try {
+                const iframeDoc = descriptionIframe.contentDocument || descriptionIframe.contentWindow.document;
+                const editableDiv = iframeDoc?.querySelector('div[contenteditable="true"]');
+                if (editableDiv) {
+                    description = editableDiv.innerHTML.replace(/<br>/g, '\n').replace(/<[^>]*>/g, '').trim();
+                }
+            } catch (error) {
+                console.warn('Could not extract description from iframe');
+            }
+        }
+        
+        if (!description) {
+            const descTextarea = document.querySelector('textarea[name="description"]');
+            if (descTextarea && descTextarea.value) {
+                description = descTextarea.value.trim();
+            }
+        }
+        
+        if (description) {
+            extractedData.description = description;
+        }
+        
+        // Extract condition
+        const selectedCondition = document.querySelector('input[name="condition"]:checked');
+        if (selectedCondition) {
+            extractedData.conditionValue = selectedCondition.value;
+            
+            // Map condition values back to readable text
+            const conditionMap = {
+                '1000': 'new with tags/box',
+                '1500': 'new without tags/box', 
+                '1750': 'new with defects',
+                '2990': 'pre-owned - excellent',
+                '3000': 'pre-owned - good',
+                '3010': 'pre-owned - fair'
+            };
+            extractedData.condition = conditionMap[selectedCondition.value] || `unknown (${selectedCondition.value})`;
+        }
+        
+        // Extract condition description
+        const conditionTextarea = document.querySelector('textarea[name="itemConditionDescription"]');
+        if (conditionTextarea && conditionTextarea.value) {
+            extractedData.conditionDescription = conditionTextarea.value.trim();
+        }
+        
+        // Extract category information
+        const categoryButton = document.querySelector('button[name="categoryId"]');
+        if (categoryButton) {
+            const categoryText = categoryButton.textContent.trim();
+            if (categoryText && categoryText !== 'Item category') {
+                extractedData.category = categoryText;
+            }
+        }
+        
+        // Extract all attribute fields dynamically
+        const attributeButtons = document.querySelectorAll('button[name^="attributes."]');
+        
+        for (const button of attributeButtons) {
+            const attributeName = button.getAttribute('name').replace('attributes.', '');
+            const buttonText = button.textContent.trim();
+            
+            // Skip empty or placeholder values
+            if (buttonText && 
+                !buttonText.includes('Select') && 
+                !buttonText.includes('Choose') &&
+                buttonText !== attributeName &&
+                buttonText.length > 0) {
+                
+                // Convert attribute name to JSON property format
+                const jsonProperty = attributeName
+                    .toLowerCase()
+                    .replace(/[^a-zA-Z0-9]/g, ' ')
+                    .trim()
+                    .split(' ')
+                    .map((word, index) => index === 0 ? word : word.charAt(0).toUpperCase() + word.slice(1))
+                    .join('');
+                
+                // Handle multi-select fields (look for multiple selections)
+                if (['theme', 'material', 'features', 'accents', 'season', 'occasion', 'performanceActivity'].includes(jsonProperty)) {
+                    // For multi-select, we'd need to check what's actually selected
+                    // This is complex as we'd need to open the dropdown and check selected items
+                    // For now, just record that something is selected
+                    extractedData[jsonProperty] = `[Multi-select: ${buttonText}]`;
+                } else {
+                    extractedData[jsonProperty] = buttonText;
+                }
+            }
+        }
+        
+        // Extract store category if present
+        const storeCategoryButton = document.querySelector('button[name="primaryStoreCategoryId"], button[name="storeCategoryId"]');
+        if (storeCategoryButton) {
+            const storeCategoryText = storeCategoryButton.textContent.trim();
+            if (storeCategoryText && !storeCategoryText.includes('Select')) {
+                extractedData.storeCategory = storeCategoryText;
+            }
+        }
+        
+        console.log('📝 Extracted form data:', extractedData);
+        return extractedData;
+        
+    } catch (error) {
+        console.error('❌ Error extracting form data:', error);
+        return extractedData;
+    }
+}
+
+// Compare original JSON data with extracted form data
+function compareFormData(original, extracted) {
+    const differences = [];
+    
+    // Field mappings for comparison
+    const fieldMappings = {
+        'title': 'title',
+        'sku': 'sku',
+        'priceCAD': 'priceCAD',
+        'description': 'description',
+        'condition': 'condition',
+        'conditionDescription': 'conditionDescription',
+        'category': 'category',
+        'storeCategory': 'storeCategory'
+    };
+    
+    // Add all attribute mappings
+    const attributeFields = [
+        'brand', 'size', 'color', 'style', 'type', 'material', 'pattern', 
+        'department', 'theme', 'features', 'accents', 'closure', 'fabricType',
+        'countryRegionOfManufacture', 'model', 'productLine', 'performanceActivity',
+        'occasion', 'liningMaterial', 'outerShellMaterial'
+    ];
+    
+    attributeFields.forEach(field => {
+        fieldMappings[field] = field;
+    });
+    
+    // Compare each field
+    for (const [originalField, extractedField] of Object.entries(fieldMappings)) {
+        const originalValue = original[originalField];
+        const extractedValue = extracted[extractedField];
+        
+        // Skip if both are empty/undefined
+        if (!originalValue && !extractedValue) continue;
+        
+        // Handle different data types
+        if (Array.isArray(originalValue)) {
+            // For arrays, check if extracted value contains the array elements
+            if (!extractedValue || extractedValue.includes('[Multi-select:')) {
+                // Multi-select field detected, can't easily verify without opening dropdown
+                differences.push(`${originalField}: Multi-select field verification skipped (Original: ${JSON.stringify(originalValue)}, Form: ${extractedValue || 'empty'})`);
+            } else {
+                const hasMatch = originalValue.some(val => 
+                    extractedValue.toLowerCase().includes(val.toLowerCase())
+                );
+                if (!hasMatch) {
+                    differences.push(`${originalField}: Array mismatch (Original: ${JSON.stringify(originalValue)}, Form: ${extractedValue})`);
+                }
+            }
+        } else if (originalValue && extractedValue) {
+            // Both have values, check if they match (case insensitive)
+            const originalLower = String(originalValue).toLowerCase().trim();
+            const extractedLower = String(extractedValue).toLowerCase().trim();
+            
+            // Special handling for category names with & character
+            const normalizedOriginal = originalLower.replace(/&/g, 'and').replace(/\s+/g, ' ');
+            const normalizedExtracted = extractedLower.replace(/&/g, 'and').replace(/\s+/g, ' ');
+            
+            if (normalizedOriginal !== normalizedExtracted && 
+                !normalizedOriginal.includes(normalizedExtracted) && 
+                !normalizedExtracted.includes(normalizedOriginal)) {
+                differences.push(`${originalField}: Value mismatch (Original: "${originalValue}", Form: "${extractedValue}")`);
+            }
+        } else if (originalValue && !extractedValue) {
+            differences.push(`${originalField}: Missing from form (Original: "${originalValue}", Form: empty)`);
+        } else if (!originalValue && extractedValue) {
+            differences.push(`${originalField}: Extra value in form (Original: empty, Form: "${extractedValue}")`);
+        }
+    }
+    
+    // Special check for gender/department consistency in category
+    if (original.department && extracted.category) {
+        const department = original.department.toLowerCase();
+        const category = extracted.category.toLowerCase();
+        
+        if (department === 'men' && (category.includes('women') || category.includes('ladies'))) {
+            differences.push(`GENDER MISMATCH: Department is "${original.department}" but category is "${extracted.category}"`);
+        } else if (department === 'women' && category.includes('men') && !category.includes('women')) {
+            differences.push(`GENDER MISMATCH: Department is "${original.department}" but category is "${extracted.category}"`);
+        }
+    }
+    
+    return differences;
+}
+
+// Highlight mismatched fields with red border and focus on the first one
+async function highlightMismatchedFields(differences, originalData, extractedData) {
+    const highlightedFields = [];
+    let firstFieldToFocus = null;
+    
+    // Parse differences to extract field names
+    const mismatchedFields = differences.map(diff => {
+        // Extract field name from difference string (before the colon)
+        const match = diff.match(/^([^:]+):/);
+        return match ? match[1].trim() : null;
+    }).filter(field => field);
+    
+    console.log('🎯 Highlighting mismatched fields:', mismatchedFields);
+    
+    // Field to selector mappings
+    const fieldSelectors = {
+        'title': 'input[name="title"]',
+        'sku': 'input[name="customLabel"]',
+        'priceCAD': 'input[name="price"]',
+        'description': 'iframe[id*="se-rte-frame"], textarea[name="description"]',
+        'condition': 'input[name="condition"]:checked',
+        'conditionDescription': 'textarea[name="itemConditionDescription"]',
+        'category': 'button[name="categoryId"]',
+        'storeCategory': 'button[name="primaryStoreCategoryId"], button[name="storeCategoryId"]',
+        'brand': 'button[name="attributes.Brand"]',
+        'size': 'button[name="attributes.Size"]',
+        'color': 'button[name="attributes.Color"]',
+        'style': 'button[name="attributes.Style"]',
+        'type': 'button[name="attributes.Type"]',
+        'material': 'button[name="attributes.Material"]',
+        'pattern': 'button[name="attributes.Pattern"]',
+        'department': 'button[name="attributes.Department"]',
+        'theme': 'button[name="attributes.Theme"]',
+        'features': 'button[name="attributes.Features"]',
+        'accents': 'button[name="attributes.Accents"]',
+        'closure': 'button[name="attributes.Closure"]',
+        'fabricType': 'button[name="attributes.Fabric Type"]',
+        'countryRegionOfManufacture': 'button[name="attributes.Country/Region of Manufacture"]',
+        'model': 'button[name="attributes.Model"]',
+        'productLine': 'button[name="attributes.Product Line"]',
+        'performanceActivity': 'button[name="attributes.Performance/Activity"]',
+        'occasion': 'button[name="attributes.Occasion"]',
+        'liningMaterial': 'button[name="attributes.Lining Material"]',
+        'outerShellMaterial': 'button[name="attributes.Outer Shell Material"]'
+    };
+    
+    // Create CSS for highlighting
+    const highlightCSS = `
+        .ebay-xlister-mismatch {
+            border: 3px solid #ff4444 !important;
+            box-shadow: 0 0 10px rgba(255, 68, 68, 0.5) !important;
+            background-color: rgba(255, 68, 68, 0.1) !important;
+            animation: ebay-xlister-pulse 2s infinite !important;
+        }
+        
+        @keyframes ebay-xlister-pulse {
+            0% { box-shadow: 0 0 10px rgba(255, 68, 68, 0.5); }
+            50% { box-shadow: 0 0 20px rgba(255, 68, 68, 0.8); }
+            100% { box-shadow: 0 0 10px rgba(255, 68, 68, 0.5); }
+        }
+    `;
+    
+    // Add CSS to page if not already added
+    if (!document.getElementById('ebay-xlister-mismatch-styles')) {
+        const style = document.createElement('style');
+        style.id = 'ebay-xlister-mismatch-styles';
+        style.textContent = highlightCSS;
+        document.head.appendChild(style);
+    }
+    
+    // Highlight each mismatched field
+    for (const fieldName of mismatchedFields) {
+        const selector = fieldSelectors[fieldName];
+        if (!selector) {
+            console.warn(`⚠️ No selector found for field: ${fieldName}`);
+            continue;
+        }
+        
+        // Handle multiple selectors separated by comma
+        const selectors = selector.split(',').map(s => s.trim());
+        let element = null;
+        
+        for (const sel of selectors) {
+            element = document.querySelector(sel);
+            if (element) break;
+        }
+        
+        if (element) {
+            console.log(`🎯 Highlighting field: ${fieldName}`);
+            
+            // Special handling for iframe (description field)
+            if (element.tagName === 'IFRAME') {
+                try {
+                    const iframeDoc = element.contentDocument || element.contentWindow.document;
+                    const editableDiv = iframeDoc?.querySelector('div[contenteditable="true"]');
+                    if (editableDiv) {
+                        editableDiv.classList.add('ebay-xlister-mismatch');
+                        highlightedFields.push({element: editableDiv, originalClass: editableDiv.className});
+                    }
+                } catch (error) {
+                    // If iframe access fails, highlight the iframe itself
+                    element.classList.add('ebay-xlister-mismatch');
+                    highlightedFields.push({element, originalClass: element.className});
+                }
+            } else {
+                // For regular elements, highlight the container or the element itself
+                let targetElement = element;
+                
+                // For buttons and inputs, try to highlight the parent container for better visibility
+                if (element.tagName === 'BUTTON' || element.tagName === 'INPUT') {
+                    const container = element.closest('.field') || 
+                                    element.closest('.form-field') || 
+                                    element.closest('.input-group') ||
+                                    element.closest('.field-group') ||
+                                    element.parentElement;
+                    
+                    if (container && container !== document.body) {
+                        targetElement = container;
+                    }
+                }
+                
+                targetElement.classList.add('ebay-xlister-mismatch');
+                highlightedFields.push({element: targetElement, originalClass: targetElement.className});
+            }
+            
+            // Set the first field to focus on
+            if (!firstFieldToFocus) {
+                firstFieldToFocus = element;
+            }
+        } else {
+            console.warn(`⚠️ Element not found for field: ${fieldName} (selector: ${selector})`);
+        }
+    }
+    
+    // Focus on the first mismatched field and scroll to it
+    if (firstFieldToFocus) {
+        console.log('🎯 Original first field to focus:', firstFieldToFocus);
+        
+        // Find the actual first element with the mismatch class in DOM order (from top)
+        const allMismatchedElements = document.querySelectorAll('.ebay-xlister-mismatch');
+        const firstMismatchedElement = allMismatchedElements[0];
+        
+        if (firstMismatchedElement) {
+            console.log('🎯 Actual first mismatched element found:', firstMismatchedElement);
+            
+            // Scroll to the first mismatched element
+            firstMismatchedElement.scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'center',
+                inline: 'center'
+            });
+            
+            // Find the corresponding interactive element to focus on
+            let interactiveElement = firstFieldToFocus;
+            
+            // Try to find the interactive element within or related to the highlighted element
+            if (firstMismatchedElement.tagName === 'BUTTON' || firstMismatchedElement.tagName === 'INPUT') {
+                interactiveElement = firstMismatchedElement;
+            } else {
+                // Look for button/input within the highlighted container
+                const innerButton = firstMismatchedElement.querySelector('button, input');
+                const innerInput = firstMismatchedElement.querySelector('input[type="text"], input[type="number"], textarea');
+                
+                if (innerButton) {
+                    interactiveElement = innerButton;
+                } else if (innerInput) {
+                    interactiveElement = innerInput;
+                }
+            }
+            
+            console.log('🎯 Interactive element to focus:', interactiveElement);
+            
+            // Wait for scroll to complete, then focus
+            setTimeout(() => {
+                try {
+                    // Focus on the interactive element
+                    interactiveElement.focus();
+                    
+                    // For buttons, click to open dropdown after a short delay
+                    if (interactiveElement.tagName === 'BUTTON') {
+                        setTimeout(() => {
+                            console.log('🔘 Clicking button to open dropdown');
+                            interactiveElement.click();
+                        }, 300);
+                    }
+                    
+                } catch (error) {
+                    console.warn('Could not focus on first mismatched field:', error);
+                }
+            }, 500);
+            
+        } else {
+            console.warn('⚠️ No elements found with .ebay-xlister-mismatch class');
+        }
+    }
+    
+    // Log summary
+    console.log(`🔴 Highlighted ${highlightedFields.length} mismatched fields with red borders`);
+    console.log('💡 Check the form - mismatched fields are highlighted in red with pulsing animation');
+    console.log('🔄 Highlights will remain until page refresh or manual correction');
+    
+    return highlightedFields;
 }
