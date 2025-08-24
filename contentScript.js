@@ -58,19 +58,39 @@ async function waitForIframeReady(iframe, timeout = 5000) {
 async function fillDropdown(buttonSelector, searchInputSelector, value) {
     const button = document.querySelector(buttonSelector);
     if (!button) return;
+    
+    // Safety check: prevent theme values from being set in brand field
+    if (buttonSelector.includes('Brand') && ['Sports', 'Art', 'Beach', 'Bike', 'Bohemian', 'California', 'Classic', 'College', 'Logo'].includes(value)) {
+        console.warn(`🚫 Prevented theme value "${value}" from being set in brand field`);
+        return;
+    }
+    
     button.click();
+    await new Promise(resolve => setTimeout(resolve, 300)); // Give time for dropdown to open
+    
     const input = await waitForSelector(searchInputSelector);
+    if (!input) {
+        console.warn(`⚠️ Could not find input for ${buttonSelector}`);
+        return;
+    }
+    
     input.focus();
     input.value = value;
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await new Promise(resolve => setTimeout(resolve, 500));
-    const dropdownMenu = button.parentElement.querySelector('.menu__items'); // <<< restrict search to the correct menu
+    
+    // Look for dropdown menu within the button's container to avoid cross-field pollution
+    const container = button.closest('.field') || button.closest('.form-field') || button.parentElement;
+    const dropdownMenu = container?.querySelector('.menu__items') || button.parentElement.querySelector('.menu__items');
     const menuItems = Array.from(dropdownMenu?.querySelectorAll('span') || []);
     const match = menuItems.find(item => item.innerText.trim().toLowerCase() === value.trim().toLowerCase());
+    
     if (match) {
         match.click();
+        console.log(`✅ Selected "${value}" for ${buttonSelector}`);
     } else {
         input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        console.log(`⌨️ Used Enter key for "${value}" in ${buttonSelector}`);
     }
 }
 
@@ -78,21 +98,52 @@ async function fillMultiSelect(buttonSelector, searchInputSelector, values) {
     const button = document.querySelector(buttonSelector);
     if (!button) return;
     
+    console.log(`🔧 Opening multi-select for: ${buttonSelector}`);
+    
     // Open dropdown once at the beginning
     button.click();
     await new Promise(resolve => setTimeout(resolve, 800));
     
-    // Find the search input - try multiple selectors
+    // Find the search input - start with the specific selector
     let input = document.querySelector(searchInputSelector);
+    
+    // If not found, try to find input within the button's immediate area
     if (!input) {
-        input = document.querySelector('input[placeholder*="Search"]');
-    }
-    if (!input) {
-        input = document.querySelector('.filter-menu input[type="text"]');
+        // Look for the input that just appeared (likely the one we opened)
+        const potentialInputs = document.querySelectorAll('input[placeholder*="Search"], .filter-menu input[type="text"]');
+        
+        // Try to find the input that's visible and in the right context
+        for (const inp of potentialInputs) {
+            const inputRect = inp.getBoundingClientRect();
+            const buttonRect = button.getBoundingClientRect();
+            
+            // Check if the input is visible and near the button
+            if (inputRect.height > 0 && inputRect.width > 0) {
+                // Check if it's in a reasonable position relative to the button
+                const isNearButton = Math.abs(inputRect.top - buttonRect.bottom) < 200;
+                if (isNearButton) {
+                    input = inp;
+                    console.log(`📍 Found multi-select input near button: ${inp.placeholder || inp.name || 'unnamed'}`);
+                    break;
+                }
+            }
+        }
     }
     
     if (!input) {
-        console.warn(`⚠️ Could not find search input for multi-select field`);
+        console.warn(`⚠️ Could not find search input for multi-select field ${buttonSelector}`);
+        document.body.click();
+        return;
+    }
+    
+    console.log(`✅ Using input for multi-select: ${input.placeholder || input.name || 'unnamed'}`);
+    
+    // Verify this is the right input by checking it's not a brand/size/color input
+    const inputName = (input.name || '').toLowerCase();
+    const inputPlaceholder = (input.placeholder || '').toLowerCase();
+    if (inputName.includes('brand') || inputName.includes('size') || inputName.includes('color') ||
+        inputPlaceholder.includes('brand') || inputPlaceholder.includes('size') || inputPlaceholder.includes('color')) {
+        console.warn(`⚠️ Detected wrong input field (${inputName || inputPlaceholder}), aborting multi-select for ${buttonSelector}`);
         document.body.click();
         return;
     }
@@ -131,23 +182,34 @@ async function selectSingleValue(input, value, selectedCount) {
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await new Promise(resolve => setTimeout(resolve, 300));
     
-    // Look for matching menu items
+    // Look for matching menu items - be more specific about which menu we're looking at
     const menuItems = Array.from(document.querySelectorAll('.filter-menu__item'));
+    console.log(`🔍 Found ${menuItems.length} menu items, searching for: "${value}"`);
+    
     const match = menuItems.find(item => {
         const text = item.querySelector('.filter-menu__text');
-        return text && text.textContent.trim().toLowerCase() === value.trim().toLowerCase();
+        const textContent = text?.textContent?.trim()?.toLowerCase();
+        const isMatch = textContent === value.trim().toLowerCase();
+        if (isMatch) {
+            console.log(`✅ Found exact match for "${value}": ${textContent}`);
+        }
+        return isMatch;
     });
     
     if (match) {
         const isChecked = match.getAttribute('aria-checked') === 'true';
         if (!isChecked) {
             // Select the item efficiently
+            console.log(`🎯 Selecting "${value}" in multi-select`);
             match.click();
             selectedCount.count++;
             await new Promise(resolve => setTimeout(resolve, 150));
+        } else {
+            console.log(`✓ "${value}" already selected`);
         }
     } else {
         // Try Enter key as fallback for custom values
+        console.log(`⌨️ No exact match found for "${value}", trying Enter key`);
         input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
         await new Promise(resolve => setTimeout(resolve, 200));
     }
@@ -479,6 +541,11 @@ async function fillFields(data) {
         }
 
         console.log('✅ Form filling completed successfully!');
+        
+        // Verify and fix brand field if needed - do this AFTER all filling is complete
+        if (data.brand) {
+            await verifyAndFixBrandField(data.brand);
+        }
 
         async function handleCategorySelection(data) {
             // Handle both eBay categories and Store categories
@@ -1425,9 +1492,24 @@ async function fillFields(data) {
 
 
         // Fill basic visible fields first (these are typically always visible)
-        if (data.brand) await fillDropdown('button[name="attributes.Brand"]', 'input[name="search-box-attributesBrand"]', data.brand);
-        if (data.size) await fillDropdown('button[name="attributes.Size"]', 'input[name="search-box-attributesSize"]', data.size);
-        if (data.color) await fillDropdown('button[name="attributes.Color"]', 'input[name="search-box-attributesColor"]', data.color);
+        // Add extra timing and protection for brand field
+        if (data.brand) {
+            console.log(`🔖 Setting brand: ${data.brand}`);
+            await fillDropdown('button[name="attributes.Brand"]', 'input[name="search-box-attributesBrand"]', data.brand);
+            await new Promise(resolve => setTimeout(resolve, 500)); // Extra delay after brand
+        }
+        
+        if (data.size) {
+            console.log(`📏 Setting size: ${data.size}`);
+            await fillDropdown('button[name="attributes.Size"]', 'input[name="search-box-attributesSize"]', data.size);
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+        
+        if (data.color) {
+            console.log(`🎨 Setting color: ${data.color}`);
+            await fillDropdown('button[name="attributes.Color"]', 'input[name="search-box-attributesColor"]', data.color);
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
 
         // Check for and click "Show more" button if it exists and is not expanded
         const showMoreButton = document.querySelector('button[_track="1.ATTRIBUTES.0.ShowMore"][aria-expanded="false"]');
@@ -1532,19 +1614,30 @@ async function fillFields(data) {
                 try {
                     if (['material', 'theme', 'accents', 'features', 'season'].includes(jsonProperty) && Array.isArray(value)) {
                         // Handle multi-select fields (material, theme, accents, features, season)
+                        console.log(`🔧 Processing multi-select field: ${attributeName} with values:`, value);
+                        
+                        // Add extra delay for theme field to prevent interference with brand
+                        if (jsonProperty === 'theme') {
+                            console.log('⏰ Adding extra delay before theme processing to protect brand field...');
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                        }
+                        
                         await fillMultiSelect(
                             `button[name="attributes.${attributeName}"]`,
                             'input[aria-label="Search or enter your own. Search results appear below"]',
                             value
                         );
+                        console.log(`✅ Completed multi-select field: ${attributeName}`);
                     } else {
                         // Handle regular dropdown fields
+                        console.log(`🔧 Processing dropdown field: ${attributeName} with value: ${value}`);
                         const searchInputName = `search-box-attributes${attributeName.replace(/[^a-zA-Z]/g, '')}`;
                         await fillDropdown(
                             `button[name="attributes.${attributeName}"]`,
                             `input[name="${searchInputName}"]`,
                             Array.isArray(value) ? value[0] : value
                         );
+                        console.log(`✅ Completed dropdown field: ${attributeName}`);
                     }
                 } catch (error) {
                     console.warn(`⚠️ Failed to fill ${attributeName}:`, error.message);
@@ -2437,3 +2530,81 @@ Current page not supported: ${window.location.hostname}`);
         }
     }
 });
+
+// Brand verification function to ensure the correct brand is set
+async function verifyAndFixBrandField(expectedBrand) {
+    try {
+        console.log(`🔍 Verifying brand field should be: ${expectedBrand}`);
+        
+        // Wait a bit for any pending operations to complete
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Find the brand button and check its current value
+        const brandButton = document.querySelector('button[name="attributes.Brand"]');
+        if (!brandButton) {
+            console.warn('⚠️ Brand button not found during verification');
+            return;
+        }
+        
+        // Check the current displayed value in the brand field
+        const currentDisplayValue = brandButton.textContent.trim();
+        const isCorrect = currentDisplayValue.toLowerCase().includes(expectedBrand.toLowerCase()) || 
+                          expectedBrand.toLowerCase().includes(currentDisplayValue.toLowerCase());
+        
+        console.log(`🔍 Current brand field shows: "${currentDisplayValue}"`);
+        
+        if (!isCorrect && currentDisplayValue !== 'Brand') {
+            console.warn(`⚠️ Brand field verification failed. Expected: "${expectedBrand}", Found: "${currentDisplayValue}"`);
+            console.log('🔧 Attempting to fix brand field...');
+            
+            // Clear any open dropdowns first
+            document.body.click();
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Re-fill the brand field with more aggressive approach
+            console.log('🔄 Re-filling brand field...');
+            const brandInput = document.querySelector('input[name="search-box-attributesBrand"]');
+            if (brandInput) {
+                // Clear any existing value
+                brandInput.value = '';
+                brandInput.dispatchEvent(new Event('input', { bubbles: true }));
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+            
+            // Re-fill the brand field
+            await fillDropdown('button[name="attributes.Brand"]', 'input[name="search-box-attributesBrand"]', expectedBrand);
+            
+            // Verify again
+            await new Promise(resolve => setTimeout(resolve, 500));
+            const newDisplayValue = brandButton.textContent.trim();
+            if (newDisplayValue.toLowerCase().includes(expectedBrand.toLowerCase())) {
+                console.log(`✅ Brand field fixed successfully: ${newDisplayValue}`);
+            } else {
+                console.warn(`❌ Brand field fix failed. Still shows: ${newDisplayValue}`);
+                
+                // Last resort: try manual selection
+                console.log('🚨 Attempting manual brand correction...');
+                brandButton.click();
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                const brandSearchInput = document.querySelector('input[name="search-box-attributesBrand"]');
+                if (brandSearchInput) {
+                    brandSearchInput.value = expectedBrand;
+                    brandSearchInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    // Press Enter to select
+                    brandSearchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    
+                    const finalDisplayValue = brandButton.textContent.trim();
+                    console.log(`🏁 Final brand field value: ${finalDisplayValue}`);
+                }
+            }
+        } else {
+            console.log(`✅ Brand field verified correctly: ${currentDisplayValue}`);
+        }
+    } catch (error) {
+        console.error('❌ Error during brand verification:', error);
+    }
+}
