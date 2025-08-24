@@ -55,6 +55,44 @@ async function waitForIframeReady(iframe, timeout = 5000) {
     });
 }
 
+// Map country names from US eBay format to Canadian eBay format
+function mapCountryForCanada(countryName) {
+    if (!countryName) return countryName;
+    
+    const countryMappings = {
+        'turkey': 'türkiye',
+        'south korea': 'korea, south',
+        'north korea': 'korea, north', 
+        'united states': 'united states',
+        'united kingdom': 'united kingdom',
+        'china': 'china',
+        'vietnam': 'viet nam',
+        'russia': 'russian federation',
+        'iran': 'iran, islamic republic of',
+        'syria': 'syrian arab republic',
+        'venezuela': 'venezuela, bolivarian republic of',
+        'bolivia': 'bolivia, plurinational state of',
+        'macedonia': 'north macedonia',
+        'czech republic': 'czechia',
+        'congo': 'congo, the democratic republic of the',
+        'cape verde': 'cabo verde',
+        'myanmar': 'myanmar',
+        'burma': 'myanmar', // Burma is also Myanmar
+        'ivory coast': 'côte d\'ivoire',
+        'swaziland': 'eswatini'
+    };
+    
+    const normalizedInput = countryName.toLowerCase().trim();
+    
+    // Check if we have a direct mapping
+    if (countryMappings[normalizedInput]) {
+        return countryMappings[normalizedInput];
+    }
+    
+    // Return original if no mapping found
+    return countryName;
+}
+
 async function fillDropdown(buttonSelector, searchInputSelector, value) {
     const button = document.querySelector(buttonSelector);
     if (!button) return;
@@ -73,9 +111,18 @@ async function fillDropdown(buttonSelector, searchInputSelector, value) {
         console.warn(`⚠️ Could not find input for ${buttonSelector}`);
         return;
     }
+
+    // Apply country mapping for Country/Region of Manufacture field
+    let searchValue = value;
+    if (buttonSelector.includes('Country/Region of Manufacture')) {
+        searchValue = mapCountryForCanada(value);
+        if (searchValue !== value) {
+            console.log(`🗺️ Country mapping: "${value}" → "${searchValue}"`);
+        }
+    }
     
     input.focus();
-    input.value = value;
+    input.value = searchValue;
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await new Promise(resolve => setTimeout(resolve, 500));
     
@@ -85,19 +132,36 @@ async function fillDropdown(buttonSelector, searchInputSelector, value) {
     // First try standard menu items
     let dropdownMenu = container?.querySelector('.menu__items') || button.parentElement.querySelector('.menu__items');
     let menuItems = Array.from(dropdownMenu?.querySelectorAll('span') || []);
-    let match = menuItems.find(item => item.innerText.trim().toLowerCase() === value.trim().toLowerCase());
+    let match = menuItems.find(item => item.innerText.trim().toLowerCase() === searchValue.trim().toLowerCase());
+    
+    // If not found and this is a country field, try fuzzy matching with original value too
+    if (!match && buttonSelector.includes('Country/Region of Manufacture')) {
+        match = menuItems.find(item => {
+            const itemText = item.innerText.trim().toLowerCase();
+            const originalLower = value.trim().toLowerCase();
+            const searchLower = searchValue.trim().toLowerCase();
+            
+            return itemText === originalLower || itemText === searchLower ||
+                   itemText.includes(originalLower) || itemText.includes(searchLower) ||
+                   originalLower.includes(itemText) || searchLower.includes(itemText);
+        });
+        
+        if (match) {
+            console.log(`🎯 Found country match via fuzzy search: "${match.innerText.trim()}" for "${value}"`);
+        }
+    }
     
     // If not found, try filter menu items (used for Performance/Activity and similar fields)
     if (!match) {
         const filterMenuItems = Array.from(document.querySelectorAll('.filter-menu__item'));
-        console.log(`🔍 Found ${filterMenuItems.length} filter menu items, searching for: "${value}"`);
+        console.log(`🔍 Found ${filterMenuItems.length} filter menu items, searching for: "${searchValue}"`);
         
         match = filterMenuItems.find(item => {
             const text = item.querySelector('.filter-menu__text');
             const textContent = text?.textContent?.trim()?.toLowerCase();
-            const isMatch = textContent === value.trim().toLowerCase();
+            const isMatch = textContent === searchValue.trim().toLowerCase();
             if (isMatch) {
-                console.log(`✅ Found exact match in filter menu for "${value}": ${textContent}`);
+                console.log(`✅ Found exact match in filter menu for "${searchValue}": ${textContent}`);
             }
             return isMatch;
         });
@@ -108,7 +172,7 @@ async function fillDropdown(buttonSelector, searchInputSelector, value) {
         if (match.classList.contains('filter-menu__item')) {
             const isChecked = match.getAttribute('aria-checked') === 'true';
             if (!isChecked) {
-                console.log(`🎯 Selecting filter menu item "${value}"`);
+                console.log(`🎯 Selecting filter menu item "${searchValue}"`);
                 match.click();
                 await new Promise(resolve => setTimeout(resolve, 150));
                 
@@ -116,16 +180,16 @@ async function fillDropdown(buttonSelector, searchInputSelector, value) {
                 document.body.click();
                 await new Promise(resolve => setTimeout(resolve, 300));
             } else {
-                console.log(`✓ "${value}" already selected in filter menu`);
+                console.log(`✓ "${searchValue}" already selected in filter menu`);
             }
         } else {
             // Regular menu item
             match.click();
         }
-        console.log(`✅ Selected "${value}" for ${buttonSelector}`);
+        console.log(`✅ Selected "${searchValue}" for ${buttonSelector}`);
     } else {
         input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-        console.log(`⌨️ Used Enter key for "${value}" in ${buttonSelector}`);
+        console.log(`⌨️ Used Enter key for "${searchValue}" in ${buttonSelector}`);
     }
 }
 
@@ -3322,11 +3386,28 @@ function compareFormData(original, extracted) {
             const originalLower = String(originalValue).toLowerCase().trim();
             const extractedLower = String(extractedValue).toLowerCase().trim();
             
+            // Special handling for country names - apply mapping for comparison
+            let isCountryMatch = false;
+            if (originalField === 'countryRegionOfManufacture') {
+                const mappedOriginal = mapCountryForCanada(originalValue).toLowerCase().trim();
+                isCountryMatch = mappedOriginal === extractedLower || 
+                               originalLower === extractedLower ||
+                               mappedOriginal.includes(extractedLower) ||
+                               extractedLower.includes(mappedOriginal) ||
+                               originalLower.includes(extractedLower) ||
+                               extractedLower.includes(originalLower);
+                               
+                if (isCountryMatch) {
+                    console.log(`✅ Country match found: "${originalValue}" → "${extractedValue}" (mapped: "${mapCountryForCanada(originalValue)}")`);
+                }
+            }
+            
             // Special handling for category names with & character
             const normalizedOriginal = originalLower.replace(/&/g, 'and').replace(/\s+/g, ' ');
             const normalizedExtracted = extractedLower.replace(/&/g, 'and').replace(/\s+/g, ' ');
             
-            if (normalizedOriginal !== normalizedExtracted && 
+            if (!isCountryMatch && 
+                normalizedOriginal !== normalizedExtracted && 
                 !normalizedOriginal.includes(normalizedExtracted) && 
                 !normalizedExtracted.includes(normalizedOriginal)) {
                 differences.push(`${originalField}: Value mismatch (Original: "${originalValue}", Form: "${extractedValue}")`);
