@@ -435,7 +435,7 @@ function calculateCategoryMatchScore(labelText, targetCategory, targetPath, cate
     }
     
     return {
-        score: Math.max(0, score), // Don't allow negative scores
+        score: score, // Allow negative scores for gender mismatches
         reason: reasons.join(', ') || 'no specific matches'
     };
 }
@@ -1218,7 +1218,7 @@ async function fillFields(data) {
             ];
             
             let targetResult = null;
-            let bestMatch = { score: 0, element: null, reason: '', labelText: '' };
+            let bestMatch = { score: -2000, element: null, reason: '', labelText: '' }; // Start with very low score
             
             for (const selector of resultSelectors) {
                 const elements = document.querySelectorAll(selector);
@@ -1231,9 +1231,25 @@ async function fillFields(data) {
                     let score;
                     if (searchTerm !== targetCategory) {
                         // We searched with partial term, look for exact match to original
-                        if (labelText.toLowerCase().includes(targetCategory.toLowerCase())) {
-                            score = { score: 1000, reason: 'exact match to original category with &' };
-                            console.warn(`🎯 Found exact match for "${targetCategory}": "${labelText}"`);
+                        const labelLower = labelText.toLowerCase();
+                        const targetLower = targetCategory.toLowerCase();
+                        
+                        // Check for EXACT match (not just contains) to avoid confusion between similar categories
+                        const isExactMatch = labelLower === targetLower || 
+                                           labelLower.replace(/[&\s]+/g, ' ').trim() === targetLower.replace(/[&\s]+/g, ' ').trim();
+                        
+                        if (isExactMatch) {
+                            // Still apply gender scoring even for exact matches to prevent gender mismatches
+                            score = calculateCategoryMatchScore(labelText, targetCategory, targetPath, categoryInfo);
+                            score.score += 500; // Bonus for exact match
+                            score.reason = `exact match + ${score.reason}`;
+                            console.warn(`🎯 Found EXACT match for "${targetCategory}": "${labelText}" (score: ${score.score})`);
+                        } else if (labelLower.includes(targetLower)) {
+                            // Partial match - still use normal scoring with small bonus
+                            score = calculateCategoryMatchScore(labelText, targetCategory, targetPath, categoryInfo);
+                            score.score += 100; // Small bonus for containing target
+                            score.reason = `partial match + ${score.reason}`;
+                            console.warn(`🔍 Found partial match for "${targetCategory}": "${labelText}" (score: ${score.score})`);
                         } else {
                             // Score this option based on category name and path matching
                             score = calculateCategoryMatchScore(labelText, targetCategory, targetPath, categoryInfo);
@@ -1250,7 +1266,9 @@ async function fillFields(data) {
                     
                     if (score.score > bestMatch.score) {
                         bestMatch = { score: score.score, element: element, reason: score.reason, labelText: labelText };
-                        console.warn(`🏆 New best match: "${labelText}" with score ${score.score}`);
+                        console.warn(`🏆 New best match: "${labelText}" with score ${score.score} (previous best: ${bestMatch.score})`);
+                    } else if (score.score < 0) {
+                        console.warn(`❌ Negative score for "${labelText}": ${score.score} - likely gender mismatch`);
                     }
                 }
             }
@@ -1263,6 +1281,25 @@ async function fillFields(data) {
                 const isGoodMatch = selectedCategoryText.toLowerCase().includes(targetCategory.toLowerCase()) ||
                                    targetCategory.toLowerCase().includes(selectedCategoryText.toLowerCase()) ||
                                    bestMatch.score >= 80; // High confidence score
+                
+                // Additional gender validation check
+                const listingData = window.currentListingData;
+                if (listingData && listingData.department) {
+                    const department = listingData.department.toLowerCase();
+                    const selectedLower = selectedCategoryText.toLowerCase();
+                    
+                    if (department === 'men' && (selectedLower.includes('women') || selectedLower.includes('ladies'))) {
+                        console.error(`🚫 CRITICAL GENDER MISMATCH: Men's item selecting women's category: "${selectedCategoryText}"`);
+                        console.error(`🚫 Score was: ${bestMatch.score}, reason: ${bestMatch.reason}`);
+                        // Don't proceed with this selection
+                        return false;
+                    } else if (department === 'women' && selectedLower.includes('men') && !selectedLower.includes('women')) {
+                        console.error(`🚫 CRITICAL GENDER MISMATCH: Women's item selecting men's category: "${selectedCategoryText}"`);
+                        console.error(`🚫 Score was: ${bestMatch.score}, reason: ${bestMatch.reason}`);
+                        // Don't proceed with this selection
+                        return false;
+                    }
+                }
                 
                 if (!isGoodMatch) {
                     console.warn(`⚠️ CATEGORY MISMATCH: Selected "${selectedCategoryText}" but intended "${targetCategory}"`);
@@ -1277,6 +1314,15 @@ async function fillFields(data) {
                 console.warn('❌ No suitable match found');
                 return false;
             }
+            
+            // FINAL CATEGORY SELECTION SUMMARY
+            console.warn(`🏆 FINAL SELECTION SUMMARY:`);
+            console.warn(`   Target Category: "${targetCategory}"`);
+            console.warn(`   Search Term Used: "${searchTerm}"`);
+            console.warn(`   Selected Category: "${bestMatch.labelText}"`);
+            console.warn(`   Final Score: ${bestMatch.score}`);
+            console.warn(`   Reason: ${bestMatch.reason}`);
+            console.warn(`   Department: ${window.currentListingData?.department || 'none'}`);
             
             // Click the radio button
             targetResult.checked = true; // Set as checked
@@ -2874,7 +2920,8 @@ async function verifyAndFixBrandField(expectedBrand) {
 async function attemptAutoFix(differences, originalData, extractedData) {
     const remainingDifferences = [];
     
-    for (const diff of differences) {
+    for (let i = 0; i < differences.length; i++) {
+        const diff = differences[i];
         const fieldMatch = diff.match(/^([^:]+):/);
         if (!fieldMatch) {
             remainingDifferences.push(diff);
@@ -2883,6 +2930,9 @@ async function attemptAutoFix(differences, originalData, extractedData) {
         
         const fieldName = fieldMatch[1].trim();
         let fixed = false;
+        
+        // Update progress message
+        updateLoadingMessage(`Auto-fixing field ${i + 1} of ${differences.length}: ${fieldName}...`);
         
         // Auto-fix missing closure field
         if (fieldName === 'closure' && diff.includes('Missing from form') && originalData.closure) {
@@ -3011,14 +3061,34 @@ async function performFormVerification(originalData) {
                 console.warn(`${index + 1}. ${diff}`);
             });
             
-            // Try to auto-fix some common issues before highlighting
-            const remainingDifferences = await attemptAutoFix(differences, originalData, extractedData);
+            // Show loading overlay during auto-fix process
+            const autoFixOverlay = createLoadingOverlay();
+            autoFixOverlay.querySelector('#loading-message').textContent = 'Attempting to auto-fix form mismatches...';
+            document.body.appendChild(autoFixOverlay);
             
-            // Only highlight if there are still unfixed differences
-            if (remainingDifferences.length > 0) {
-                await highlightMismatchedFields(remainingDifferences, originalData, extractedData);
-            } else {
-                console.log('✅ All verification issues were auto-fixed!');
+            try {
+                // Try to auto-fix some common issues before highlighting
+                const remainingDifferences = await attemptAutoFix(differences, originalData, extractedData);
+                
+                // Remove loading overlay
+                if (autoFixOverlay && autoFixOverlay.parentNode) {
+                    autoFixOverlay.remove();
+                }
+                
+                // Only highlight if there are still unfixed differences
+                if (remainingDifferences.length > 0) {
+                    await highlightMismatchedFields(remainingDifferences, originalData, extractedData);
+                } else {
+                    console.log('✅ All verification issues were auto-fixed!');
+                }
+            } catch (error) {
+                // Remove loading overlay on error
+                if (autoFixOverlay && autoFixOverlay.parentNode) {
+                    autoFixOverlay.remove();
+                }
+                console.error('❌ Error during auto-fix process:', error);
+                // Still try to highlight the original differences
+                await highlightMismatchedFields(differences, originalData, extractedData);
             }
             
         } else {
