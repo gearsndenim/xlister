@@ -1706,6 +1706,9 @@ async function fillFields(data) {
         }
 
         // Check for JSON fields that weren't found on the page
+        // Handle dynamic package weight based on item type
+        await handlePackageWeight(data);
+
         // Handle image uploading if image URLs are provided
         if (data.images && Array.isArray(data.images) && data.images.length > 0) {
             await handleImageUpload(data.images);
@@ -2166,6 +2169,134 @@ function removeLoadingOverlay() {
     const overlay = document.getElementById('ebay-xlister-loading-overlay');
     if (overlay) {
         overlay.remove();
+    }
+}
+
+async function handlePackageWeight(data) {
+    try {
+        console.log('📦 Setting dynamic package weight based on item type...');
+        
+        // Determine weight based on category, item type, and other attributes
+        const weight = calculateDynamicWeight(data);
+        
+        if (!weight) {
+            console.log('⚠️ Could not determine appropriate weight for this item type');
+            return;
+        }
+        
+        console.log(`📦 Setting package weight to ${weight}g based on item analysis`);
+        
+        // Find the weight input fields
+        const minorWeightInput = document.querySelector('input[name="minorWeight"]');
+        const majorWeightInput = document.querySelector('input[name="majorWeight"]');
+        
+        if (minorWeightInput) {
+            // Clear major weight (kg) field
+            if (majorWeightInput) {
+                majorWeightInput.value = '';
+                majorWeightInput.dispatchEvent(new Event('input', { bubbles: true }));
+                majorWeightInput.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            
+            // Set minor weight (grams) field
+            minorWeightInput.focus();
+            minorWeightInput.value = weight.toString();
+            minorWeightInput.dispatchEvent(new Event('input', { bubbles: true }));
+            minorWeightInput.dispatchEvent(new Event('change', { bubbles: true }));
+            minorWeightInput.dispatchEvent(new Event('blur', { bubbles: true }));
+            
+            console.log(`✅ Package weight set to ${weight}g`);
+        } else {
+            console.warn('⚠️ Could not find package weight input fields');
+        }
+        
+    } catch (error) {
+        console.error('❌ Error setting package weight:', error);
+    }
+}
+
+function calculateDynamicWeight(data) {
+    try {
+        // Get various item indicators
+        const title = (data.title || '').toLowerCase();
+        const category = (data.category || '').toLowerCase();
+        const categoryPath = data.categoryInfo?.path || data.categoryInfo?.fullPath || '';
+        const categoryPathLower = categoryPath.toLowerCase();
+        const type = (data.type || '').toLowerCase();
+        
+        // Combine all text for analysis
+        const allText = `${title} ${category} ${categoryPathLower} ${type}`.toLowerCase();
+        
+        console.log(`🔍 Analyzing item for weight: "${title}"`);
+        console.log(`📂 Category info: "${category}" | "${categoryPath}"`);
+        
+        // Weight categories (from heaviest to lightest for priority matching)
+        
+        // 950g - Jackets, Coats, Heavy Outerwear, Vests
+        if (allText.match(/\b(jacket|coat|parka|bomber|blazer|windbreaker|outerwear|vest)\b/)) {
+            console.log('🧥 Detected jacket/coat/vest - setting weight to 950g');
+            return 950;
+        }
+        
+        // 800g - Jeans, Heavy Pants
+        if (allText.match(/\b(jeans?|denim)\b/)) {
+            console.log('👖 Detected jeans - keeping default weight at 800g');
+            return 800;
+        }
+        
+        // 680g - Pants, Sweatpants, Hoodies, Sweatshirts
+        if (allText.match(/\b(pants?|trousers?|sweatpants?|joggers?|hoodi?es?|sweatshirts?|pullover|sweater)\b/)) {
+            console.log('👕 Detected pants/sweatpants/hoodie/sweatshirt - setting weight to 680g');
+            return 680;
+        }
+        
+        // 400g - Shoes, Sneakers, Boots
+        if (allText.match(/\b(shoes?|sneakers?|boots?|sandals?|loafers?|heels?|flats?|footwear)\b/) ||
+            categoryPathLower.includes('shoes') || categoryPathLower.includes('footwear')) {
+            console.log('👟 Detected shoes - setting weight to 400g');
+            return 400;
+        }
+        
+        // 400g - Shirts, Shorts, Light Items
+        if (allText.match(/\b(shirts?|t-shirts?|tees?|tops?|blouses?|tank|shorts?|polo|dress shirt)\b/)) {
+            console.log('👔 Detected shirt/shorts - setting weight to 400g');
+            return 400;
+        }
+        
+        // Check by category path for more specific matching
+        if (categoryPathLower.includes('shirts') || categoryPathLower.includes('tops')) {
+            console.log('👔 Detected shirt/top from category - setting weight to 400g');
+            return 400;
+        }
+        
+        if (categoryPathLower.includes('shorts')) {
+            console.log('🩳 Detected shorts from category - setting weight to 400g');
+            return 400;
+        }
+        
+        if (categoryPathLower.includes('jeans')) {
+            console.log('👖 Detected jeans from category - keeping default weight at 800g');
+            return 800;
+        }
+        
+        if (categoryPathLower.includes('hoodies') || categoryPathLower.includes('sweatshirts')) {
+            console.log('👕 Detected hoodie/sweatshirt from category - setting weight to 680g');
+            return 680;
+        }
+        
+        // Default fallback - if it's clothing but we can't determine specific type
+        if (categoryPathLower.includes('clothing') || categoryPathLower.includes('apparel')) {
+            console.log('👕 Detected general clothing - using default weight of 680g');
+            return 680;
+        }
+        
+        // If no specific match found, return null to keep existing weight
+        console.log('❓ Could not determine specific item type - keeping existing weight');
+        return null;
+        
+    } catch (error) {
+        console.error('❌ Error calculating dynamic weight:', error);
+        return null;
     }
 }
 
