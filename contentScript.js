@@ -259,38 +259,57 @@ async function fillMultiSelect(buttonSelector, searchInputSelector, values) {
     
     // Extract the expected field name from button selector
     const buttonNameMatch = buttonSelector.match(/name="attributes\.([^"]+)"/);
-    const expectedFieldName = buttonNameMatch ? buttonNameMatch[1].toLowerCase().replace(/\s+/g, '') : '';
+    const expectedFieldName = buttonNameMatch ? buttonNameMatch[1].toLowerCase().replace(/\s+/g, '').replace(/[^a-z]/g, '') : '';
     
-    // Only abort if we detect a conflicting field type (not the one we're trying to fill)
-    const isConflictingField = (
-        (inputName.includes('brand') && !expectedFieldType.includes('brand') && expectedFieldName !== 'brand') ||
-        (inputName.includes('size') && !expectedFieldType.includes('size') && expectedFieldName !== 'size') ||
-        (inputName.includes('color') && !expectedFieldType.includes('color') && expectedFieldName !== 'color')
+    console.log(`🔍 Multi-select field check: expected="${expectedFieldName}", input name="${inputName}", placeholder="${inputPlaceholder}"`);
+    
+    // Build expected input name variations for the target field
+    const expectedInputVariations = [
+        `search-box-attributes${expectedFieldName}`,
+        `attributes${expectedFieldName}`,
+        expectedFieldName
+    ];
+    
+    // Check if the current input matches any of the expected variations
+    const isCorrectInput = expectedInputVariations.some(variation => 
+        inputName.includes(variation) || inputPlaceholder.includes(variation)
+    );
+    
+    // Only abort if we detect a clearly conflicting field (wrong field entirely)
+    const isConflictingField = !isCorrectInput && (
+        (inputName.includes('brand') && expectedFieldName !== 'brand') ||
+        (inputName.includes('size') && expectedFieldName !== 'size') ||
+        (inputName.includes('color') && expectedFieldName !== 'color') ||
+        (inputName.includes('type') && expectedFieldName !== 'type') ||
+        (inputName.includes('style') && expectedFieldName !== 'style')
     );
     
     if (isConflictingField) {
-        console.warn(`⚠️ Detected wrong input field (${inputName || inputPlaceholder}), aborting multi-select for ${buttonSelector}`);
+        console.warn(`⚠️ Detected wrong input field (${inputName || inputPlaceholder}), expected ${expectedFieldName}, aborting multi-select for ${buttonSelector}`);
         document.body.click();
         
-        // Try to find the correct input field
+        // Try to find the correct input field using more specific selectors
         const correctInputSelectors = [
-            `input[name*="${expectedFieldName}"]`,
+            `input[name="search-box-attributes${expectedFieldName.charAt(0).toUpperCase() + expectedFieldName.slice(1)}"]`,
+            `input[name*="attributes${expectedFieldName.charAt(0).toUpperCase() + expectedFieldName.slice(1)}"]`,
             `input[name*="search-box-attributes${expectedFieldName}"]`,
+            `input[name*="attributes${expectedFieldName}"]`,
             `input[placeholder*="${expectedFieldName}"]`
         ];
         
         for (const selector of correctInputSelectors) {
             const correctInput = document.querySelector(selector);
-            if (correctInput && !correctInput.name.includes('brand')) {
-                console.log(`🔧 Found correct input: ${correctInput.name || correctInput.placeholder}`);
+            if (correctInput && !correctInput.name.includes('brand') && correctInput !== input) {
+                console.log(`🔧 Found correct input for ${expectedFieldName}: ${correctInput.name || correctInput.placeholder}`);
                 input = correctInput;
                 break;
             }
         }
         
-        // If still can't find correct input, abort
-        if (isConflictingField) {
-            return;
+        // If still no correct input found, skip this field
+        if (!input || input.name.includes('brand')) {
+            console.warn(`❌ Could not find correct input field for ${expectedFieldName}, skipping`);
+            return false;
         }
     }
     
