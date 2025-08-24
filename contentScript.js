@@ -162,9 +162,9 @@ function calculateCategoryMatchScore(labelText, targetCategory, targetPath, cate
     const targetPathLower = targetPath?.toLowerCase() || '';
     
     // Debug logging for gender detection
-    console.warn(`🔍 Scoring: "${labelText}" vs target "${targetCategory}"`);
-    console.warn(`📍 Target path: "${targetPath}"`);
-    console.warn(`👤 Category info:`, categoryInfo);
+    console.log(`🔍 Scoring: "${labelText}" vs target "${targetCategory}"`);
+    console.log(`📍 Target path: "${targetPath}"`);
+    console.log(`👤 Category info:`, categoryInfo);
     
     // 1. Category name matching (most important)
     if (labelLower === targetLower) {
@@ -180,10 +180,10 @@ function calculateCategoryMatchScore(labelText, targetCategory, targetPath, cate
     
     // 2. Gender/department matching (very important for disambiguation)
     if (targetPathLower) {
-        console.warn(`🚻 Gender analysis: targetPath="${targetPathLower}"`);
+        console.log(`🚻 Gender analysis: targetPath="${targetPathLower}"`);
         if (targetPathLower.includes('men') && !targetPathLower.includes('women')) {
             // This is a men's item
-            console.warn(`♂️ Detected men's item from path`);
+            console.log(`♂️ Detected men's item from path`);
             if (labelLower.includes('men') && !labelLower.includes('women')) {
                 score += 50;
                 reasons.push('men\'s category match');
@@ -193,7 +193,7 @@ function calculateCategoryMatchScore(labelText, targetCategory, targetPath, cate
             }
         } else if (targetPathLower.includes('women') || targetPathLower.includes('ladies')) {
             // This is a women's item
-            console.warn(`♀️ Detected women's item from path`);
+            console.log(`♀️ Detected women's item from path`);
             if (labelLower.includes('women') || labelLower.includes('ladies')) {
                 score += 50;
                 reasons.push('women\'s category match');
@@ -202,7 +202,7 @@ function calculateCategoryMatchScore(labelText, targetCategory, targetPath, cate
                 reasons.push('wrong gender (men vs women)');
             }
         } else {
-            console.warn(`⚪ No clear gender detected in path`);
+            console.log(`⚪ No clear gender detected in path`);
         }
         
         // 3. Other path elements matching
@@ -219,7 +219,7 @@ function calculateCategoryMatchScore(labelText, targetCategory, targetPath, cate
     if (categoryInfo) {
         const categoryData = JSON.stringify(categoryInfo).toLowerCase();
         if (categoryData.includes('women') || categoryData.includes('ladies')) {
-            console.warn(`♀️ Detected women's item from categoryInfo`);
+            console.log(`♀️ Detected women's item from categoryInfo`);
             if (labelLower.includes('women') || labelLower.includes('ladies')) {
                 score += 40;
                 reasons.push('women\'s category match (from info)');
@@ -228,7 +228,7 @@ function calculateCategoryMatchScore(labelText, targetCategory, targetPath, cate
                 reasons.push('wrong gender from info (men vs women)');
             }
         } else if (categoryData.includes('men') && !categoryData.includes('women')) {
-            console.warn(`♂️ Detected men's item from categoryInfo`);
+            console.log(`♂️ Detected men's item from categoryInfo`);
             if (labelLower.includes('men') && !labelLower.includes('women')) {
                 score += 40;
                 reasons.push('men\'s category match (from info)');
@@ -465,16 +465,7 @@ async function fillFields(data) {
             }
         }
 
-        // Handle condition field
-        if (data.condition || data.itemConditionDescription) {
-            const conditionText = data.itemConditionDescription || data.condition || 'Pre-owned';
-            const conditionTextarea = document.querySelector('textarea[name="itemConditionDescription"]');
-            if (conditionTextarea) {
-                conditionTextarea.value = conditionText;
-                conditionTextarea.dispatchEvent(new Event('input', { bubbles: true }));
-                conditionTextarea.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        }
+
 
         // Handle other form fields
         // Set quantity if provided
@@ -1431,18 +1422,7 @@ async function fillFields(data) {
             }
         }
 
-        if (conditionTextarea && data.conditionDescription) {
-            if (data.conditionDescription.endsWith(".")) {
-                data.conditionDescription = data.conditionDescription.slice(0, -1);
-            }
-            const defaultConditionText = settings.defaults.defaultConditionText || 'washed using hypoallergenic laundry detergent that is free of dyes and perfumes.'
-            if (!data.conditionDescription.endsWith(defaultConditionText)) {
-                conditionTextarea.value = data.conditionDescription + ', ' + defaultConditionText;
-            } else {
-                conditionTextarea.value = data.conditionDescription;
-            }
-            conditionTextarea.dispatchEvent(new Event('input', { bubbles: true }));
-        }
+
 
         // Fill basic visible fields first (these are typically always visible)
         if (data.brand) await fillDropdown('button[name="attributes.Brand"]', 'input[name="search-box-attributesBrand"]', data.brand);
@@ -1570,7 +1550,7 @@ async function fillFields(data) {
                     console.warn(`⚠️ Failed to fill ${attributeName}:`, error.message);
                 }
             } else {
-                console.warn(`📝 Field ${attributeName} found on page but no data in JSON (${jsonProperty})`);
+                console.log(`📝 Field ${attributeName} found on page but no data in JSON (${jsonProperty})`);
             }
         }
 
@@ -1639,59 +1619,158 @@ async function fillFields(data) {
         });
 
         // Handle condition selection
-        // First, check if we need to infer condition from conditionDescription
-        if ((!data.condition || data.condition === 'undefined' || data.condition === '') && data.conditionDescription) {
-            // If we have a condition description but no condition, default to pre-owned
-            data.condition = 'pre-owned';
-        }
+        await handleConditionSelection(data);
 
-        if (data.condition && data.condition !== 'undefined' && data.condition !== '') {
-            // Create mapping for common condition values
+        async function handleConditionSelection(data) {
+            // First, check if we need to infer condition from conditionDescription
+            if ((!data.condition || data.condition === 'undefined' || data.condition === '') && data.conditionDescription) {
+                // Infer condition from description text patterns
+                const description = data.conditionDescription.toLowerCase();
+                if (description.includes('new') && (description.includes('tag') || description.includes('box'))) {
+                    data.condition = 'new with tags'; // Will map to either tags or box
+                } else if (description.includes('new') && (description.includes('defect') || description.includes('imperfection'))) {
+                    data.condition = 'new with imperfections';
+                } else if (description.includes('new')) {
+                    data.condition = 'new without tags'; // Will map to either tags or box
+                } else if (description.includes('excellent')) {
+                    data.condition = 'pre-owned - excellent';
+                } else if (description.includes('fair') || description.includes('flaw') || description.includes('stain') || description.includes('damage')) {
+                    data.condition = 'pre-owned - fair';
+                } else {
+                    // Default to good for other pre-owned items
+                    data.condition = 'pre-owned - good';
+                }
+            }
+
+            if (!data.condition || data.condition === 'undefined' || data.condition === '') {
+                console.warn('⚠️ No condition information available');
+                return;
+            }
+
+            // Create mapping for condition values to eBay's radio button values
             const conditionMappings = {
-                'new with tags': 'New with tags',
-                'new': 'New with tags',
-                'pre-owned': 'Pre-owned - Good',
-                'pre-owned - good': 'Pre-owned - Good',
-                'good': 'Pre-owned - Good',
-                'used': 'Pre-owned - Good',
-                'pre-owned - excellent': 'Pre-owned - Excellent',
-                'excellent': 'Pre-owned - Excellent',
-                'pre-owned - very good': 'Pre-owned - Very Good',
-                'very good': 'Pre-owned - Very Good',
-                'pre-owned - fair': 'Pre-owned - Fair',
-                'fair': 'Pre-owned - Fair'
+                // New conditions (handles both apparel and shoes)
+                'new with box': '1000',
+                'new with tags': '1000',
+                'new': '1000',
+                'new without box': '1500',
+                'new without tags': '1500',
+                'new with defects': '1750',
+                'new with imperfections': '1750',
+                'new defects': '1750',
+                'new irregular': '1750',
+                // Pre-owned conditions
+                'pre-owned - excellent': '2990',
+                'pre-owned excellent': '2990',
+                'excellent': '2990',
+                'pre-owned - good': '3000',
+                'pre-owned good': '3000',
+                'pre-owned': '3000',
+                'good': '3000',
+                'used': '3000',
+                'pre-owned - fair': '3010',
+                'pre-owned fair': '3010',
+                'fair': '3010'
             };
             
-            const normalizedCondition = data.condition.toLowerCase();
-            const mappedCondition = conditionMappings[normalizedCondition] || data.condition;
+            const normalizedCondition = data.condition.toLowerCase().trim();
+            const conditionValue = conditionMappings[normalizedCondition];
             
-            // Try to find and click the condition button first
-            const conditionButtons = document.querySelectorAll('.condition-recommendation-value');
+            if (!conditionValue) {
+                console.warn(`⚠️ No mapping found for condition: ${data.condition}`);
+                return;
+            }
+
+            console.log(`🏷️ Setting condition: ${data.condition} → value ${conditionValue}`);
+
+            // Method 1: Try to find radio buttons with the condition values (most reliable)
             let conditionSet = false;
+            const radioButtons = document.querySelectorAll('input[name="condition"][type="radio"]');
             
-            for (const button of conditionButtons) {
-                const buttonText = button.textContent.trim();
-                if (buttonText === mappedCondition) {
-                    button.click();
+            for (const radio of radioButtons) {
+                if (radio.value === conditionValue) {
+                    console.log(`✅ Found radio button with value ${conditionValue}, clicking...`);
+                    radio.checked = true;
+                    radio.click();
+                    radio.dispatchEvent(new Event('change', { bubbles: true }));
                     conditionSet = true;
                     break;
                 }
             }
-            
-            // If not found in visible buttons, try the "..." more options button
+
+            // Method 2: If radio buttons not found, try clicking condition recommendation buttons
             if (!conditionSet) {
-                const moreOptionsButton = document.querySelector('.condition-recommendation-more-values');
-                if (moreOptionsButton) {
-                    moreOptionsButton.click();
+                const conditionTextMappings = {
+                    '1000': ['New with box', 'New with tags'], // Handle both shoes and apparel
+                    '1500': ['New without box', 'New without tags'],
+                    '1750': ['New with defects', 'New with imperfections'], 
+                    '2990': ['Pre-owned - Excellent'],
+                    '3000': ['Pre-owned - Good'],
+                    '3010': ['Pre-owned - Fair']
+                };
+                
+                const possibleTexts = conditionTextMappings[conditionValue] || [];
+                
+                // Try to find and click the condition button
+                const conditionButtons = document.querySelectorAll('.condition-recommendation-value, button[aria-label*="condition"]');
+                
+                for (const button of conditionButtons) {
+                    const buttonText = button.textContent.trim();
+                    if (possibleTexts.includes(buttonText) || buttonText.toLowerCase() === normalizedCondition) {
+                        console.log(`✅ Found condition button: ${buttonText}, clicking...`);
+                        button.click();
+                        conditionSet = true;
+                        break;
+                    }
+                }
+                
+                // If not found in visible buttons, try the "..." more options button
+                if (!conditionSet) {
+                    const moreOptionsButton = document.querySelector('.condition-recommendation-more-values');
+                    if (moreOptionsButton) {
+                        moreOptionsButton.click();
+                        
+                        // Wait for more options to appear and try again
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        
+                        const allConditionButtons = document.querySelectorAll('.condition-recommendation-value');
+                        for (const button of allConditionButtons) {
+                            const buttonText = button.textContent.trim();
+                            if (possibleTexts.includes(buttonText) || buttonText.toLowerCase() === normalizedCondition) {
+                                console.log(`✅ Found condition button in expanded options: ${buttonText}, clicking...`);
+                                button.click();
+                                conditionSet = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Method 3: Try finding labels associated with radio buttons
+            if (!conditionSet) {
+                const labels = document.querySelectorAll('label[for*="condition"]');
+                for (const label of labels) {
+                    const labelText = label.textContent.trim();
+                    const conditionTextMappings = {
+                        '1000': ['New with box', 'New with tags'],
+                        '1500': ['New without box', 'New without tags'],
+                        '1750': ['New with defects', 'New with imperfections'],
+                        '2990': ['Pre-owned - Excellent'],
+                        '3000': ['Pre-owned - Good'],
+                        '3010': ['Pre-owned - Fair']
+                    };
                     
-                    // Wait for more options to appear and try again
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                    const possibleTexts = conditionTextMappings[conditionValue] || [];
                     
-                    const allConditionButtons = document.querySelectorAll('.condition-recommendation-value');
-                    for (const button of allConditionButtons) {
-                        const buttonText = button.textContent.trim();
-                        if (buttonText === mappedCondition) {
-                            button.click();
+                    if (possibleTexts.includes(labelText)) {
+                        const radioId = label.getAttribute('for');
+                        const radio = document.getElementById(radioId);
+                        if (radio && radio.value === conditionValue) {
+                            console.log(`✅ Found label for radio button ${conditionValue}, clicking...`);
+                            radio.checked = true;
+                            radio.click();
+                            radio.dispatchEvent(new Event('change', { bubbles: true }));
                             conditionSet = true;
                             break;
                         }
@@ -1700,71 +1779,46 @@ async function fillFields(data) {
             }
             
             if (!conditionSet) {
-                console.warn(`⚠️ Could not find condition button for: ${data.condition} (mapped to: ${mappedCondition})`);
+                console.warn(`⚠️ Could not find condition element for: ${data.condition} (value: ${conditionValue})`);
                 return;
             }
             
             // Wait for eBay to update the DOM after condition selection
             await new Promise(resolve => setTimeout(resolve, 1000));
             
-            // Now modify the DOM to show the filled condition state
-            const conditionSection = document.querySelector('.smry.summary__condition, .smry.summary--warn.summary__condition');
-            
-            if (conditionSection) {
-                // Remove warning class and update structure
-                conditionSection.classList.remove('summary--warn');
-                conditionSection.classList.add('summary__condition');
-                
-                // Clear the warning notice
-                const noticeDiv = conditionSection.querySelector('.summary__notice');
-                if (noticeDiv) {
-                    noticeDiv.innerHTML = '';
-                }
-                
-                // Update the condition value button text
-                const conditionValueButton = conditionSection.querySelector('#summary-condition-field-value');
-                if (conditionValueButton) {
-                    conditionValueButton.textContent = mappedCondition;
-                }
-                
-                // Remove the condition recommendation section and replace with filled structure
-                const summaryRow = conditionSection.querySelector('.summary-row');
-                if (summaryRow) {
-                    try {
-                        // Replace the summary-row content with the filled state structure
-                        summaryRow.innerHTML = `
-                            <div class="summary-column">
-                                <div class="smry--section">
-                                    <div class="summary-section__sublabel">
-                                        <h3 id="summary-condition-field-label" class="textual-display">Item condition</h3>
-                                    </div>
-                                    <button id="summary-condition-field-value" name="condition" aria-labelledby="summary-condition-field-value summary-condition-field-label" _track="2.condition.0.Edit" class="smry--value refocus fake-link" data-ebayui="" type="button">${mappedCondition}</button>
-                                </div>
-                            </div>
-                        `;
-                    } catch (error) {
-                        console.warn(`⚠️ Error updating summary-row:`, error);
-                    }
-                }
-                
-                // Handle condition description
-                if (data.conditionDescription && !mappedCondition.toLowerCase().includes('new')) {
-                    
-                    // Find and populate the actual condition description textarea that eBay uses
-                    setTimeout(() => {
-                        const actualConditionTextarea = document.querySelector('textarea[name="itemConditionDescription"]');
-                        if (actualConditionTextarea) {
-                            actualConditionTextarea.value = data.conditionDescription;
-                            actualConditionTextarea.dispatchEvent(new Event('input', { bubbles: true }));
-                            actualConditionTextarea.dispatchEvent(new Event('change', { bubbles: true }));
-                        } else {
-                            console.warn(`⚠️ Could not find eBay's condition textarea`);
+            // Handle condition description if it exists and condition is pre-owned
+            if (data.conditionDescription && !['1000', '1500', '1750'].includes(conditionValue)) {
+                // Find and populate the condition description textarea
+                setTimeout(() => {
+                    const conditionTextarea = document.querySelector('textarea[name="itemConditionDescription"]');
+                    if (conditionTextarea) {
+                        let description = data.conditionDescription;
+                        
+                        // Remove trailing period if it exists
+                        if (description.endsWith('.')) {
+                            description = description.slice(0, -1);
                         }
-                    }, 1000); // Wait a bit longer for eBay's DOM to update
-                }
-            } else {
-                console.warn(`⚠️ Could not find condition section to modify`);
+                        
+                        // Add default condition text from settings
+                        const defaultConditionText = settings?.defaults?.defaultConditionText || 
+                                                    'washed using hypoallergenic laundry detergent that is free of dyes and perfumes.';
+                        
+                        if (!description.includes(defaultConditionText)) {
+                            description = description + ', ' + defaultConditionText;
+                        }
+                        
+                        conditionTextarea.value = description;
+                        conditionTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+                        conditionTextarea.dispatchEvent(new Event('change', { bubbles: true }));
+                        
+                        console.log(`📝 Set condition description: ${description}`);
+                    } else {
+                        console.warn('⚠️ Could not find condition description textarea');
+                    }
+                }, 1000);
             }
+
+            console.log(`✅ Condition set successfully: ${data.condition} (${conditionValue})`);
         }
 
         // Wait a bit more to ensure all async operations are complete
@@ -1899,8 +1953,8 @@ function createLoadingOverlay() {
         left: 0;
         width: 100%;
         height: 100%;
-        background-color: rgba(0, 0, 0, 0.7);
-        z-index: 10000;
+        background-color: rgba(0, 0, 0, 0.8);
+        z-index: 999999;
         display: flex;
         justify-content: center;
         align-items: center;
@@ -2115,7 +2169,7 @@ async function uploadSingleImage(imageUrl, uploadElement) {
 
 async function urlToFile(imageUrl) {
         try {
-            console.warn('🌐 Requesting image from background script:', imageUrl);        // Send message to background script to fetch the image
+            console.log('🌐 Requesting image from background script:', imageUrl);        // Send message to background script to fetch the image
         return new Promise((resolve, reject) => {
             chrome.runtime.sendMessage({
                 action: 'fetchImageAsBlob',
@@ -2150,7 +2204,7 @@ async function urlToFile(imageUrl) {
                             const originalWidth = img.width;
                             const originalHeight = img.height;
                             
-                            console.warn(`📏 Image dimensions: ${originalWidth}x${originalHeight}`);
+                            console.log(`📏 Image dimensions: ${originalWidth}x${originalHeight}`);
                             
                             // Skip images that are too small (thumbnails from expired listings)
                             if (originalWidth < 100 || originalHeight < 100) {
@@ -2282,7 +2336,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     // Add timestamp to prevent rapid duplicate calls
     const now = Date.now();
     if (window.lastFillTimestamp && (now - window.lastFillTimestamp) < 2000) {
-        console.warn('⚠️ Ignoring duplicate fill request (too soon after last request)');
+        console.log('⚠️ Ignoring duplicate fill request (too soon after last request)');
         return;
     }
 
@@ -2322,7 +2376,7 @@ document.addEventListener('keydown', function(event) {
         // Throttle rapid keyboard shortcuts
         const now = Date.now();
         if (window.lastKeyboardShortcut && (now - window.lastKeyboardShortcut) < 1000) {
-            console.warn('⚠️ Keyboard shortcut throttled (too rapid)');
+            console.log('⚠️ Keyboard shortcut throttled (too rapid)');
             event.preventDefault();
             return;
         }
