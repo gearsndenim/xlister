@@ -784,13 +784,16 @@ async function fillFields(data) {
         async function handleCategorySelection(data) {
             // Handle both eBay categories and Store categories
             let targetProductCategory = null;
-            let targetStoreCategory = null;
+            let targetStoreCategory = '0–30 days'; // Default store category
             let categoryPath = null;
             let isInferred = false;
             
             if (data.categoryInfo) {
                 targetProductCategory = data.categoryInfo.category;
-                targetStoreCategory = data.categoryInfo.storeCategory;
+                // Override default only if a store category was provided
+                if (data.categoryInfo.storeCategory) {
+                    targetStoreCategory = data.categoryInfo.storeCategory;
+                }
                 categoryPath = data.categoryInfo.path;
                 isInferred = data.categoryInfo.inferred || false;
             } else if (data.category) {
@@ -848,41 +851,230 @@ async function fillFields(data) {
         }
         
         async function handleStoreCategory(storeCategory) {
+            console.log('🏪 ========== STORE CATEGORY HANDLING ==========');
+            console.log('🏪 Target store category:', storeCategory);
+            
             // Look for store category selection elements
             const storeCategoryButton = document.querySelector('button[name="primaryStoreCategoryId"], button[name="storeCategoryId"]');
+            console.log('🏪 Store category button found:', !!storeCategoryButton);
+            
             if (storeCategoryButton) {
-                storeCategoryButton.click();
-                await new Promise(resolve => setTimeout(resolve, 800));
+                console.log('🏪 Clicking store category button...');
+                console.log('🏪 Button element:', storeCategoryButton);
+                console.log('🏪 Button text:', storeCategoryButton.textContent);
+                console.log('🏪 Button name:', storeCategoryButton.getAttribute('name'));
                 
-                // Look for radio buttons with store category options
-                const radioOptions = document.querySelectorAll('input[name="primaryStoreCategoryId"][type="radio"]');
+                // Scroll button into view first
+                storeCategoryButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                await new Promise(resolve => setTimeout(resolve, 300));
+                
+                // Try multiple click methods
+                storeCategoryButton.focus();
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // Method 1: Direct click
+                storeCategoryButton.click();
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Method 2: MouseEvent if first didn't work
+                const clickEvent = new MouseEvent('click', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    detail: 1
+                });
+                storeCategoryButton.dispatchEvent(clickEvent);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Method 3: mousedown + mouseup sequence
+                storeCategoryButton.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                await new Promise(resolve => setTimeout(resolve, 50));
+                storeCategoryButton.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+                
+                // Wait longer for dialog to appear and load
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                // Try multiple dialog selectors with retries
+                const dialogSelectors = [
+                    '.lightbox-dialog__window',
+                    'div[role="dialog"]',
+                    '.se-panel-container.details__category',
+                    '.keyboard-trap--active',
+                    'div[id*="dialog"]',
+                    '.dialog',
+                    '[role="dialog"]'
+                ];
+                
+                let dialog = null;
+                let dialogAttempts = 0;
+                const maxDialogAttempts = 10;
+                
+                console.log('🏪 Looking for dialog to appear...');
+                while (!dialog && dialogAttempts < maxDialogAttempts) {
+                    for (const selector of dialogSelectors) {
+                        const found = document.querySelector(selector);
+                        if (found && found.offsetParent !== null) { // Check if visible
+                            console.log(`🏪 Found visible dialog with selector: ${selector}`);
+                            dialog = found;
+                            break;
+                        }
+                    }
+                    
+                    if (!dialog) {
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                        dialogAttempts++;
+                        console.log(`🏪 Dialog search attempt ${dialogAttempts}/${maxDialogAttempts}`);
+                    }
+                }
+                
+                if (!dialog) {
+                    console.warn('🏪 ⚠️ Dialog element not found after multiple attempts');
+                    console.warn('🏪 Checking what elements are on page...');
+                    const allDialogs = document.querySelectorAll('div[role="dialog"], .dialog, [class*="dialog"]');
+                    console.warn(`🏪 Found ${allDialogs.length} potential dialog elements`);
+                    allDialogs.forEach((d, idx) => {
+                        console.warn(`🏪   ${idx + 1}. ${d.className} (visible: ${d.offsetParent !== null})`);
+                    });
+                } else {
+                    console.log('🏪 ✅ Dialog is open and visible');
+                }
+                
+                // Wait for the dialog content to load (check for fieldset or form inside dialog)
+                console.log('🏪 Waiting for dialog content to load...');
+                let contentLoaded = false;
+                let contentAttempts = 0;
+                const maxContentAttempts = 10;
+                
+                while (!contentLoaded && contentAttempts < maxContentAttempts) {
+                    const fieldset = document.querySelector('fieldset');
+                    const formContent = document.querySelector('.lightbox-dialog__window fieldset, .lightbox-dialog__window form');
+                    
+                    if (fieldset || formContent) {
+                        console.log(`🏪 Dialog content loaded after ${contentAttempts} attempts`);
+                        contentLoaded = true;
+                        break;
+                    }
+                    
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    contentAttempts++;
+                    console.log(`🏪 Content loading attempt ${contentAttempts}/${maxContentAttempts}`);
+                }
+                
+                if (!contentLoaded) {
+                    console.warn('🏪 Dialog content did not load, but continuing...');
+                }
+                
+                // Now wait for radio buttons to appear in the dialog
+                let radioOptions = [];
+                let attempts = 0;
+                const maxAttempts = 15;
+                
+                console.log('🏪 Waiting for radio buttons to appear...');
+                while (radioOptions.length === 0 && attempts < maxAttempts) {
+                    // Try multiple selectors for radio buttons
+                    radioOptions = document.querySelectorAll('input[name="primaryStoreCategoryId"][type="radio"]');
+                    if (radioOptions.length === 0) {
+                        // Try alternative selectors
+                        radioOptions = document.querySelectorAll('.lightbox-dialog__window input[type="radio"]');
+                    }
+                    if (radioOptions.length === 0) {
+                        radioOptions = document.querySelectorAll('fieldset input[type="radio"]');
+                    }
+                    
+                    if (radioOptions.length === 0) {
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                        attempts++;
+                        console.log(`🏪 Attempt ${attempts}/${maxAttempts}: ${radioOptions.length} radio buttons found`);
+                    } else {
+                        console.log(`🏪 Found ${radioOptions.length} radio options after ${attempts} attempts`);
+                        break;
+                    }
+                }
+                
+                console.log('🏪 Final count:', radioOptions.length, 'radio options');
+                
+                if (radioOptions.length > 0) {
+                    console.log('🏪 Logging all available options:');
+                    radioOptions.forEach((radio, idx) => {
+                        const label = document.querySelector(`label[for="${radio.id}"]`);
+                        const labelText = label ? label.textContent.trim() : 'no label';
+                        console.log(`🏪   ${idx + 1}. "${labelText}" (value: ${radio.value})`);
+                    });
+                } else {
+                    console.warn('🏪 ⚠️ No radio buttons found after waiting');
+                    
+                    // Try direct value mapping as last resort
+                    const categoryValueMap = {
+                        '0–30 days': '85568562013',
+                        '30–60 days': '85451187013',
+                        '60–90 days': '85451188013',
+                        '90–120 days': '85451189013',
+                        '120–150 days': '85451190013',
+                        '151–210 days': '85451191013',
+                        '210+ days': '85451192013'
+                    };
+                    
+                    const targetValue = categoryValueMap[storeCategory];
+                    console.log(`🏪 Trying direct value approach with value: ${targetValue}`);
+                    
+                    if (targetValue) {
+                        // Try to find by value directly
+                        const radioByValue = document.querySelector(`input[name="primaryStoreCategoryId"][value="${targetValue}"]`);
+                        if (radioByValue) {
+                            console.log('🏪 Found radio by value!');
+                            radioByValue.click();
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                            const doneButton = document.querySelector('button[_track="1.primaryStoreCategoryId.2.Done"]');
+                            if (doneButton) {
+                                doneButton.click();
+                            }
+                            return;
+                        }
+                    }
+                    
+                    return;
+                }
+                
                 let categorySelected = false;
                 
                 for (const radio of radioOptions) {
                     const label = document.querySelector(`label[for="${radio.id}"]`);
                     if (label) {
                         const labelText = label.textContent.trim();
+                        console.log('🏪 Checking label:', labelText);
+                        
                         // Check if this label matches our store category with flexible matching
                         const normalizedLabel = labelText.replace(/[-–—]/g, '-').toLowerCase();
                         const normalizedTarget = storeCategory.replace(/[-–—]/g, '-').toLowerCase();
+                        
+                        console.log('🏪 Normalized label:', normalizedLabel);
+                        console.log('🏪 Normalized target:', normalizedTarget);
                         
                         if (normalizedLabel === normalizedTarget ||
                             labelText === storeCategory ||
                             labelText.includes(storeCategory) ||
                             storeCategory.includes(labelText)) {
                             
+                            console.log('🏪 ✅ MATCH FOUND! Clicking radio...');
                             radio.click();
                             await new Promise(resolve => setTimeout(resolve, 200));
                             
                             const doneButton = document.querySelector('button[_track="1.primaryStoreCategoryId.2.Done"]');
                             if (doneButton) {
+                                console.log('🏪 Clicking Done button...');
                                 doneButton.click();
                                 categorySelected = true;
                                 await new Promise(resolve => setTimeout(resolve, 1000));
+                            } else {
+                                console.warn('🏪 ⚠️ Done button not found');
                             }
                             break;
                         }
                     }
+                }
+                
+                if (!categorySelected) {
+                    console.warn('🏪 ⚠️ No matching category found in first pass, trying numeric matching...');
                 }
                 
                 if (!categorySelected) {
