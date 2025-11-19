@@ -561,6 +561,17 @@ async function fillFields(data) {
     // Store the current listing data globally for category matching
     window.currentListingData = data;
     
+    // Debug: Log all JSON data keys that might be country-related
+    console.log('🗂️ ========== JSON DATA DEBUG ==========');
+    console.log('🗂️ All keys in JSON data:', Object.keys(data));
+    console.log('🗂️ Country-related fields in JSON:');
+    Object.keys(data).forEach(key => {
+        if (key.toLowerCase().includes('country') || key.toLowerCase().includes('origin') || key.toLowerCase().includes('manufacture')) {
+            console.log(`🗂️   - ${key}: "${data[key]}"`);
+        }
+    });
+    console.log('🗂️ ======================================');
+    
     // Additional protection: check if we recently processed the same data
     const dataHash = JSON.stringify(data).substring(0, 100); // Simple hash
     if (window.lastProcessedDataHash === dataHash && 
@@ -1906,8 +1917,24 @@ async function fillFields(data) {
 
         // DYNAMIC FIELD DETECTION AND FILLING
         
-        // Get all attribute buttons on the page
-        const attributeButtons = document.querySelectorAll('button[name^="attributes."]');
+        // Get all attribute buttons on the page (including itemOrigin fields)
+        const attributeButtons = [
+            ...document.querySelectorAll('button[name^="attributes."]'),
+            ...document.querySelectorAll('button[name^="itemOrigin."]')
+        ];
+        
+        console.log('📋 ========== FIELD DETECTION DEBUG ==========');
+        console.log(`📋 Total attribute buttons found: ${attributeButtons.length}`);
+        console.log('📋 All button names on page:');
+        attributeButtons.forEach((btn, idx) => {
+            const name = btn.getAttribute('name');
+            if (name.toLowerCase().includes('country') || name.toLowerCase().includes('origin')) {
+                console.log(`📋   ${idx + 1}. "${name}" ⭐ COUNTRY FIELD`);
+            } else {
+                console.log(`📋   ${idx + 1}. "${name}"`);
+            }
+        });
+        console.log('📋 ============================================');
         
         // Create a comprehensive mapping for field normalization
         const fieldMappings = {
@@ -1930,6 +1957,8 @@ async function fillFields(data) {
             'chest size': 'chestSize',
             'shirt length': 'shirtLength',
             'country/region of manufacture': 'countryRegionOfManufacture',  // Updated to match extraction
+            'country of origin': 'countryOfOrigin',  // New eBay field name (attributes) - maps to countryOfOrigin
+            'itemorigin.country of origin': 'countryOfOrigin',  // New eBay field name (item origin) - maps to countryOfOrigin
             'material': 'material',
             'pattern': 'pattern',
             'season': 'season',
@@ -1969,8 +1998,19 @@ async function fillFields(data) {
 
         // Process each attribute button found on the page
         for (const button of attributeButtons) {
-            const attributeName = button.getAttribute('name').replace('attributes.', '');
+            const buttonName = button.getAttribute('name');
+            let attributeName = buttonName.replace('attributes.', '').replace('itemOrigin.', '');
             const normalizedName = attributeName.toLowerCase();
+            const isItemOriginField = buttonName.startsWith('itemOrigin.');
+            
+            // Add debug logging for country fields
+            if (normalizedName.includes('country') || normalizedName.includes('origin')) {
+                console.log('🌍 ========== COUNTRY FIELD PROCESSING DEBUG ==========');
+                console.log(`🌍 Found country-related button: "${buttonName}"`);
+                console.log(`🌍 Attribute name: "${attributeName}"`);
+                console.log(`🌍 Normalized name: "${normalizedName}"`);
+                console.log(`🌍 Is itemOrigin field: ${isItemOriginField}`);
+            }
             
             // Skip basic fields already handled
             if (['brand', 'size', 'color'].includes(normalizedName)) {
@@ -1979,6 +2019,11 @@ async function fillFields(data) {
             
             // Try to find matching JSON property using field mappings first
             let jsonProperty = fieldMappings[normalizedName];
+            
+            // Add debug logging for country fields
+            if (normalizedName.includes('country') || normalizedName.includes('origin')) {
+                console.log(`🌍 Mapped to JSON property (from fieldMappings): "${jsonProperty || 'NOT FOUND IN MAPPING'}"`);
+            }
             
             // If not in mapping, try dynamic conversion (same as extraction)
             if (!jsonProperty) {
@@ -1989,6 +2034,19 @@ async function fillFields(data) {
                     .split(' ')
                     .map((word, index) => index === 0 ? word : word.charAt(0).toUpperCase() + word.slice(1))
                     .join('');
+                
+                // Add debug logging for country fields
+                if (normalizedName.includes('country') || normalizedName.includes('origin')) {
+                    console.log(`🌍 Dynamic conversion result: "${jsonProperty}"`);
+                }
+            }
+            
+            // Add debug logging for country fields
+            if (normalizedName.includes('country') || normalizedName.includes('origin')) {
+                console.log(`🌍 Final JSON property to use: "${jsonProperty}"`);
+                console.log(`🌍 Checking if data["${jsonProperty}"] exists...`);
+                console.log(`🌍 data["${jsonProperty}"] = "${data[jsonProperty] || 'undefined'}"`);
+                console.log(`🌍 Has value: ${data[jsonProperty] && data[jsonProperty] !== '' && !(Array.isArray(data[jsonProperty]) && data[jsonProperty].length === 0)}`);
             }
             
             // Check if we have data for this field
@@ -2008,8 +2066,9 @@ async function fillFields(data) {
                             await new Promise(resolve => setTimeout(resolve, 1000));
                         }
                         
+                        const prefix = isItemOriginField ? 'itemOrigin' : 'attributes';
                         await fillMultiSelect(
-                            `button[name="attributes.${attributeName}"]`,
+                            `button[name="${prefix}.${attributeName}"]`,
                             'input[aria-label="Search or enter your own. Search results appear below"]',
                             value
                         );
@@ -2017,13 +2076,33 @@ async function fillFields(data) {
                     } else {
                         // Handle regular dropdown fields
                         console.log(`🔧 Processing dropdown field: ${attributeName} with value: ${value}`);
-                        const searchInputName = `search-box-attributes${attributeName.replace(/[^a-zA-Z]/g, '')}`;
+                        const prefix = isItemOriginField ? 'itemOrigin' : 'attributes';
+                        const searchInputPrefix = isItemOriginField ? 'search-box-itemOrigin' : 'search-box-attributes';
+                        const searchInputName = `${searchInputPrefix}${attributeName.replace(/[^a-zA-Z]/g, '')}`;
+                        
+                        // Add extra debug for country fields
+                        if (normalizedName.includes('country') || normalizedName.includes('origin')) {
+                            console.log(`🌍 About to fill country field:`);
+                            console.log(`🌍   - Button selector: "button[name='${prefix}.${attributeName}']"`);
+                            console.log(`🌍   - Input selector: "input[name='${searchInputName}']"`);
+                            console.log(`🌍   - Value to set: "${Array.isArray(value) ? value[0] : value}"`);
+                        }
+                        
                         await fillDropdown(
-                            `button[name="attributes.${attributeName}"]`,
+                            `button[name="${prefix}.${attributeName}"]`,
                             `input[name="${searchInputName}"]`,
                             Array.isArray(value) ? value[0] : value
                         );
                         console.log(`✅ Completed dropdown field: ${attributeName}`);
+                        
+                        // Add extra verification for country fields
+                        if (normalizedName.includes('country') || normalizedName.includes('origin')) {
+                            const verifyButton = document.querySelector(`button[name="${prefix}.${attributeName}"]`);
+                            if (verifyButton) {
+                                console.log(`🌍 Verification - Button text after fill: "${verifyButton.textContent.trim()}"`);
+                            }
+                            console.log('🌍 ===================================================');
+                        }
                     }
                 } catch (error) {
                     console.warn(`⚠️ Failed to fill ${attributeName}:`, error.message);
@@ -2359,16 +2438,89 @@ async function fillFields(data) {
         }
 
         // Check for country of manufacture - required field enforcement (at the end)
-        const countryValue = data.countryRegionOfManufacture || 
+        console.log('🔍 ========== COUNTRY FIELD VALIDATION DEBUG ==========');
+        
+        // First check if the field exists on the page and has been populated
+        console.log('🔍 Step 1: Looking for country button on page...');
+        const countryButton1 = document.querySelector('button[name="attributes.Country of Origin"]');
+        const countryButton2 = document.querySelector('button[name="itemOrigin.Country of Origin"]');
+        const countryButton3 = document.querySelector('button[name="attributes.Country/Region of Manufacture"]');
+        
+        console.log('🔍 Country button searches:');
+        console.log(`   - attributes.Country of Origin: ${countryButton1 ? 'FOUND' : 'NOT FOUND'}`);
+        console.log(`   - itemOrigin.Country of Origin: ${countryButton2 ? 'FOUND' : 'NOT FOUND'}`);
+        console.log(`   - attributes.Country/Region of Manufacture: ${countryButton3 ? 'FOUND' : 'NOT FOUND'}`);
+        
+        const countryButton = countryButton1 || countryButton2 || countryButton3;
+        
+        let countryFieldPopulated = false;
+        if (countryButton) {
+            const buttonText = countryButton.textContent.trim();
+            const buttonName = countryButton.getAttribute('name');
+            console.log(`🔍 Step 2: Country button found! Name: "${buttonName}"`);
+            console.log(`🔍 Step 3: Button text content: "${buttonText}"`);
+            
+            // Check if button has a value other than placeholders
+            const hasValue = buttonText && 
+                           !buttonText.includes('Select') && 
+                           !buttonText.includes('Choose') &&
+                           !buttonText.includes('Country of Origin') &&
+                           !buttonText.includes('Country/Region of Manufacture') &&
+                           buttonText !== 'Not specified' &&
+                           buttonText.length > 0;
+            
+            console.log(`🔍 Step 4: Validation checks:`);
+            console.log(`   - Has text: ${buttonText ? 'YES' : 'NO'}`);
+            console.log(`   - Not "Select": ${!buttonText.includes('Select')}`);
+            console.log(`   - Not "Choose": ${!buttonText.includes('Choose')}`);
+            console.log(`   - Not "Country of Origin": ${!buttonText.includes('Country of Origin')}`);
+            console.log(`   - Not "Country/Region of Manufacture": ${!buttonText.includes('Country/Region of Manufacture')}`);
+            console.log(`   - Not "Not specified": ${buttonText !== 'Not specified'}`);
+            console.log(`   - Has length: ${buttonText.length > 0}`);
+            console.log(`🔍 Step 5: Final hasValue result: ${hasValue}`);
+            
+            if (hasValue) {
+                countryFieldPopulated = true;
+                console.log(`✅ Country field IS POPULATED on form: "${buttonText}"`);
+            } else {
+                console.log(`❌ Country field is NOT populated on form (placeholder text detected)`);
+            }
+        } else {
+            console.log('❌ Step 2: NO country button found on page!');
+        }
+        
+        // Also check if we have country data in JSON
+        console.log('🔍 Step 6: Checking JSON data for country values...');
+        console.log(`   - data.countryOfOrigin: "${data.countryOfOrigin || 'undefined'}"`);
+        console.log(`   - data.countryRegionOfManufacture: "${data.countryRegionOfManufacture || 'undefined'}"`);
+        console.log(`   - data.countryOfManufacture: "${data.countryOfManufacture || 'undefined'}"`);
+        console.log(`   - data['country/region of manufacture']: "${data['country/region of manufacture'] || 'undefined'}"`);
+        console.log(`   - data.country: "${data.country || 'undefined'}"`);
+        
+        const countryValue = data.countryOfOrigin ||
+                            data.countryRegionOfManufacture || 
                             data.countryOfManufacture || 
                             data['country/region of manufacture'] ||
                             data.country;
         
-        const hasValidCountryOfManufacture = countryValue && 
-                                           countryValue !== '' && 
-                                           countryValue.toLowerCase() !== 'unknown';
+        console.log(`🔍 Step 7: Selected country value from JSON: "${countryValue || 'NONE'}"`);
         
-        if (!hasValidCountryOfManufacture) {
+        const hasValidCountryData = countryValue && 
+                                   countryValue !== '' && 
+                                   countryValue.toLowerCase() !== 'unknown';
+        
+        console.log(`🔍 Step 8: Has valid country data in JSON: ${hasValidCountryData}`);
+        
+        // Only show warning if BOTH the form field is empty AND we don't have data
+        const shouldWarn = !countryFieldPopulated && !hasValidCountryData;
+        
+        console.log('🔍 Step 9: FINAL DECISION:');
+        console.log(`   - Country field populated on form: ${countryFieldPopulated}`);
+        console.log(`   - Has valid country data in JSON: ${hasValidCountryData}`);
+        console.log(`   - Should show warning: ${shouldWarn}`);
+        console.log('🔍 ===================================================');
+        
+        if (shouldWarn) {
             const missingReason = !countryValue ? 'missing' : 
                                  countryValue.toLowerCase() === 'unknown' ? 'set to "Unknown"' : 'invalid';
             
@@ -2377,8 +2529,6 @@ async function fillFields(data) {
             // Remove loading overlay first
             removeLoadingOverlay();
             
-            // Find and focus on the country field
-            const countryButton = document.querySelector('button[name="attributes.Country/Region of Manufacture"]');
             if (countryButton) {
                 countryButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 countryButton.focus();
@@ -2401,6 +2551,10 @@ async function fillFields(data) {
         } else {
             // Remove loading overlay if country of manufacture is valid
             removeLoadingOverlay();
+            
+            if (countryFieldPopulated && !hasValidCountryData) {
+                console.log(`ℹ️ Country field populated on form but not in JSON data - this is OK`);
+            }
             
             // FINAL VERIFICATION: Extract current form values and compare with original JSON
             // Trigger verification immediately after overlay closes
@@ -3329,13 +3483,33 @@ async function attemptAutoFix(differences, originalData, extractedData) {
             }
         }
         
-        // Auto-fix missing country field
-        else if (fieldName === 'countryRegionOfManufacture' && diff.includes('Missing from form') && originalData.countryRegionOfManufacture) {
-            console.log(`🔧 Auto-fixing country field: ${originalData.countryRegionOfManufacture}`);
-            const countryButton = document.querySelector('button[name="attributes.Country/Region of Manufacture"]');
+        // Auto-fix missing country field - try multiple field names and data properties
+        else if ((fieldName === 'countryRegionOfManufacture' || fieldName === 'countryOfOrigin') && 
+                 diff.includes('Missing from form') && 
+                 (originalData.countryOfOrigin || originalData.countryRegionOfManufacture)) {
+            const countryValueToUse = originalData.countryOfOrigin || originalData.countryRegionOfManufacture;
+            console.log(`🔧 Auto-fixing country field: ${countryValueToUse}`);
+            // Try new field names first, then fall back to old one
+            const countryButton = document.querySelector('button[name="attributes.Country of Origin"]') ||
+                                 document.querySelector('button[name="itemOrigin.Country of Origin"]') ||
+                                 document.querySelector('button[name="attributes.Country/Region of Manufacture"]');
             if (countryButton) {
                 try {
-                    await fillDropdown('button[name="attributes.Country/Region of Manufacture"]', 'input[name="search-box-attributesCountryRegionofManufacture"]', originalData.countryRegionOfManufacture);
+                    const buttonName = countryButton.getAttribute('name');
+                    let buttonSelector, inputSelector;
+                    
+                    if (buttonName === 'attributes.Country of Origin') {
+                        buttonSelector = 'button[name="attributes.Country of Origin"]';
+                        inputSelector = 'input[name="search-box-attributesCountryofOrigin"]';
+                    } else if (buttonName === 'itemOrigin.Country of Origin') {
+                        buttonSelector = 'button[name="itemOrigin.Country of Origin"]';
+                        inputSelector = 'input[name="search-box-itemOriginCountryofOrigin"]';
+                    } else {
+                        buttonSelector = 'button[name="attributes.Country/Region of Manufacture"]';
+                        inputSelector = 'input[name="search-box-attributesCountryRegionofManufacture"]';
+                    }
+                    
+                    await fillDropdown(buttonSelector, inputSelector, countryValueToUse);
                     // Wait for the selection to be reflected in the UI
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     fixed = true;
@@ -3493,7 +3667,7 @@ async function removeHighlightFromField(fieldName) {
             'accents': 'button[name="attributes.Accents"]',
             'closure': 'button[name="attributes.Closure"]',
             'fabricType': 'button[name="attributes.Fabric Type"]',
-            'countryRegionOfManufacture': 'button[name="attributes.Country/Region of Manufacture"]',
+            'countryRegionOfManufacture': 'button[name="attributes.Country of Origin"], button[name="itemOrigin.Country of Origin"], button[name="attributes.Country/Region of Manufacture"]',
             'model': 'button[name="attributes.Model"]',
             'productLine': 'button[name="attributes.Product Line"]',
             'performanceActivity': 'button[name="attributes.Performance/Activity"]',
@@ -3693,11 +3867,15 @@ async function extractCurrentFormData() {
             }
         }
         
-        // Extract all attribute fields dynamically
-        const attributeButtons = document.querySelectorAll('button[name^="attributes."]');
+        // Extract all attribute fields dynamically (including itemOrigin fields)
+        const attributeButtons = [
+            ...document.querySelectorAll('button[name^="attributes."]'),
+            ...document.querySelectorAll('button[name^="itemOrigin."]')
+        ];
         
         for (const button of attributeButtons) {
-            const attributeName = button.getAttribute('name').replace('attributes.', '');
+            const buttonName = button.getAttribute('name');
+            const attributeName = buttonName.replace('attributes.', '').replace('itemOrigin.', '');
             const buttonText = button.textContent.trim();
             
             // Skip empty or placeholder values - improved detection
@@ -3944,7 +4122,7 @@ async function highlightMismatchedFields(differences, originalData, extractedDat
         'accents': 'button[name="attributes.Accents"]',
         'closure': 'button[name="attributes.Closure"]',
         'fabricType': 'button[name="attributes.Fabric Type"]',
-        'countryRegionOfManufacture': 'button[name="attributes.Country/Region of Manufacture"]',
+        'countryRegionOfManufacture': 'button[name="attributes.Country of Origin"], button[name="itemOrigin.Country of Origin"], button[name="attributes.Country/Region of Manufacture"]',
         'model': 'button[name="attributes.Model"]',
         'productLine': 'button[name="attributes.Product Line"]',
         'performanceActivity': 'button[name="attributes.Performance/Activity"]',
