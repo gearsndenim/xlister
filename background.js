@@ -753,11 +753,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               }
             });
 
-            // Extract condition
-            const conditionSelect = document.querySelector('select[name="itemCondition"]') ||
-                                   document.querySelector('button[name="itemCondition"]');
-            if (conditionSelect) {
-              data.condition = conditionSelect.value || conditionSelect.textContent.trim();
+            // Extract condition from the listing summary view
+            // On eBay.com listing pages, condition is shown as a button element
+            const conditionButton = document.querySelector('button[name="condition"]#summary-condition-field-value');
+            
+            if (conditionButton) {
+              data.condition = conditionButton.textContent.trim();
+              console.log('🏷️ [EXTRACTION] Extracted condition from summary button:', data.condition);
+            } else {
+              console.log('🏷️ [EXTRACTION] No condition button found in summary, trying radio buttons...');
+              // Fallback: try radio buttons (if on edit page instead of listing page)
+              const selectedCondition = document.querySelector('input[name="condition"]:checked') ||
+                                       document.querySelector('input[type="radio"][name="condition"]:checked');
+              
+              if (selectedCondition) {
+                // Map condition values back to readable text
+                const conditionMap = {
+                  '1000': 'new with tags/box',
+                  '1500': 'new without tags/box', 
+                  '1750': 'new with defects',
+                  '2990': 'pre-owned - excellent',
+                  '3000': 'pre-owned - good',
+                  '3010': 'pre-owned - fair'
+                };
+                data.condition = conditionMap[selectedCondition.value] || selectedCondition.value;
+                console.log('🏷️ [EXTRACTION] Extracted condition from radio:', data.condition);
+              } else {
+                console.warn('⚠️ [EXTRACTION] Could not find condition element');
+              }
             }
 
             // Add metadata

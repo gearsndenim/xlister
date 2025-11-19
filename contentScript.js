@@ -2183,30 +2183,20 @@ async function fillFields(data) {
         await handleConditionSelection(data);
 
         async function handleConditionSelection(data) {
-            // First, check if we need to infer condition from conditionDescription
-            if ((!data.condition || data.condition === 'undefined' || data.condition === '') && data.conditionDescription) {
-                // Infer condition from description text patterns
-                const description = data.conditionDescription.toLowerCase();
-                if (description.includes('new') && (description.includes('tag') || description.includes('box'))) {
-                    data.condition = 'new with tags'; // Will map to either tags or box
-                } else if (description.includes('new') && (description.includes('defect') || description.includes('imperfection'))) {
-                    data.condition = 'new with imperfections';
-                } else if (description.includes('new')) {
-                    data.condition = 'new without tags'; // Will map to either tags or box
-                } else if (description.includes('excellent')) {
-                    data.condition = 'pre-owned - excellent';
-                } else if (description.includes('fair') || description.includes('flaw') || description.includes('stain') || description.includes('damage')) {
-                    data.condition = 'pre-owned - fair';
-                } else {
-                    // Default to good for other pre-owned items
-                    data.condition = 'pre-owned - good';
-                }
-            }
-
+            console.log('🏷️ ========== CONDITION HANDLING DEBUG ==========');
+            console.log('🏷️ Condition from JSON:', data.condition);
+            console.log('🏷️ Condition description from JSON:', data.conditionDescription);
+            
+            // NO INFERENCE - just use what we got from the source listing
+            // If condition is missing, that's an extraction error that should be fixed, not worked around
+            
             if (!data.condition || data.condition === 'undefined' || data.condition === '') {
-                console.warn('⚠️ No condition information available');
+                console.warn('⚠️ No condition extracted from source listing - this should not happen');
+                console.warn('⚠️ Check the extraction logic in background.js');
                 return;
             }
+            
+            console.log('🏷️ Using condition from source listing:', data.condition);
 
             // Create mapping for condition values to eBay's radio button values
             const conditionMappings = {
@@ -2237,8 +2227,12 @@ async function fillFields(data) {
             const normalizedCondition = data.condition.toLowerCase().trim();
             const conditionValue = conditionMappings[normalizedCondition];
             
+            console.log('🏷️ Normalized condition:', normalizedCondition);
+            console.log('🏷️ Mapped to value:', conditionValue);
+            
             if (!conditionValue) {
                 console.warn(`⚠️ No mapping found for condition: ${data.condition}`);
+                console.warn('🏷️ Available mappings:', Object.keys(conditionMappings));
                 return;
             }
 
@@ -2344,8 +2338,21 @@ async function fillFields(data) {
                 return;
             }
             
+            console.log('✅ Condition set successfully!');
+            
             // Wait for eBay to update the DOM after condition selection
             await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Verify what condition was actually selected
+            const verifyCondition = document.querySelector('input[name="condition"]:checked');
+            if (verifyCondition) {
+                console.log('🏷️ Verification - Condition value in form:', verifyCondition.value);
+                const verifyLabel = document.querySelector(`label[for="${verifyCondition.id}"]`);
+                if (verifyLabel) {
+                    console.log('🏷️ Verification - Condition label in form:', verifyLabel.textContent.trim());
+                }
+            }
+            console.log('🏷️ ==============================================');
             
             // Handle condition description if it exists and condition is pre-owned
             if (data.conditionDescription && !['1000', '1500', '1750'].includes(conditionValue)) {
@@ -3818,16 +3825,20 @@ async function extractCurrentFormData() {
         }
         
         // Extract condition - improved detection
+        console.log('🏷️ [EXTRACTION] ========== CONDITION EXTRACTION DEBUG ==========');
         let selectedCondition = document.querySelector('input[name="condition"]:checked');
+        console.log('🏷️ [EXTRACTION] Method 1 - input[name="condition"]:checked:', selectedCondition ? 'FOUND' : 'NOT FOUND');
         
         // If not found, try alternative selectors
         if (!selectedCondition) {
             selectedCondition = document.querySelector('input[type="radio"][name="condition"]:checked') ||
                                document.querySelector('input[name="itemCondition"]:checked') ||
                                document.querySelector('input[value][name*="condition"]:checked');
+            console.log('🏷️ [EXTRACTION] Method 2 - Alternative selectors:', selectedCondition ? 'FOUND' : 'NOT FOUND');
         }
         
         if (selectedCondition) {
+            console.log('🏷️ [EXTRACTION] Found radio button with value:', selectedCondition.value);
             extractedData.conditionValue = selectedCondition.value;
             
             // Map condition values back to readable text
@@ -3840,17 +3851,25 @@ async function extractCurrentFormData() {
                 '3010': 'pre-owned - fair'
             };
             extractedData.condition = conditionMap[selectedCondition.value] || `unknown (${selectedCondition.value})`;
+            console.log('🏷️ [EXTRACTION] Mapped to condition:', extractedData.condition);
         } else {
+            console.log('🏷️ [EXTRACTION] Method 3 - Trying to find from buttons/labels...');
             // Try to find condition from button text or labels
             const conditionButtons = document.querySelectorAll('button[aria-checked="true"], label[class*="selected"], div[class*="selected condition"]');
+            console.log('🏷️ [EXTRACTION] Found', conditionButtons.length, 'potential condition buttons');
             for (const button of conditionButtons) {
                 const text = button.textContent.toLowerCase();
+                console.log('🏷️ [EXTRACTION] Checking button text:', text);
                 if (text.includes('pre-owned') || text.includes('new') || text.includes('used')) {
                     extractedData.condition = button.textContent.trim();
+                    console.log('🏷️ [EXTRACTION] Found condition from button:', extractedData.condition);
                     break;
                 }
             }
         }
+        
+        console.log('🏷️ [EXTRACTION] Final extracted condition:', extractedData.condition || 'NONE');
+        console.log('🏷️ [EXTRACTION] ==============================================');
         
         // Extract condition description
         const conditionTextarea = document.querySelector('textarea[name="itemConditionDescription"]');
